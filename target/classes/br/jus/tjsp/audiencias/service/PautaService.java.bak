@@ -1,0 +1,239 @@
+package br.jus.tjsp.audiencias.service;
+
+import br.jus.tjsp.audiencias.model.ParticipacaoAudiencia;
+import br.jus.tjsp.audiencias.model.Audiencia;
+import br.jus.tjsp.audiencias.repository.AudienciaRepository;
+import br.jus.tjsp.audiencias.service.ParticipacaoAudienciaService;
+import com.itextpdf.io.image.ImageDataFactory;
+import com.itextpdf.kernel.colors.ColorConstants;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
+import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.layout.Document;
+import com.itextpdf.layout.element.Cell;
+import com.itextpdf.layout.element.Image;
+import com.itextpdf.layout.element.Paragraph;
+import com.itextpdf.layout.element.Table;
+import com.itextpdf.layout.properties.TextAlignment;
+import com.itextpdf.layout.properties.UnitValue;
+import com.itextpdf.layout.properties.VerticalAlignment;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+
+@Service
+public class PautaService {
+
+    private static final Logger logger = LoggerFactory.getLogger(PautaService.class);
+
+    @Autowired
+    private AudienciaRepository audienciaRepository;
+    
+    @Autowired
+    private ParticipacaoAudienciaService participacaoService;
+
+    public byte[] gerarPautaPDF(LocalDate data) throws Exception {
+        logger.info("Iniciando geração de PDF para a data: {}", data);
+        
+        try {
+            List<Audiencia> audiencias = audienciaRepository.findByDataAudienciaOrderByHorarioInicio(data);
+            logger.info("Encontradas {} audiências para a data {}", audiencias.size(), data);
+            
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PdfWriter writer = new PdfWriter(baos);
+            PdfDocument pdfDoc = new PdfDocument(writer);
+            Document document = new Document(pdfDoc);
+
+            logger.info("Documento PDF criado com sucesso");
+
+            // Fontes
+            PdfFont fontBold = PdfFontFactory.createFont();
+            PdfFont fontRegular = PdfFontFactory.createFont();
+
+            logger.info("Fontes criadas com sucesso");
+
+            // Cabeçalho com logo e texto do TJSP
+            try {
+                // Carregar logo do TJSP
+                ClassPathResource logoResource = new ClassPathResource("static/images/logotipo_tjsp.png");
+                logger.info("Tentando carregar logo do caminho: static/images/logotipo_tjsp.png");
+                
+                Image logo = new Image(ImageDataFactory.create(logoResource.getInputStream().readAllBytes()));
+                logo.setWidth(60);
+                logo.setHeight(60);
+
+                logger.info("Logo carregado com sucesso");
+
+                // Criar tabela para cabeçalho com logo e texto
+                Table headerTable = new Table(UnitValue.createPercentArray(new float[]{1, 4}));
+                headerTable.setWidth(UnitValue.createPercentValue(100));
+
+                // Célula com logo
+                Cell logoCell = new Cell()
+                        .add(logo)
+                        .setVerticalAlignment(VerticalAlignment.MIDDLE)
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setBorder(null);
+
+                // Célula com texto
+                Cell textCell = new Cell()
+                        .add(new Paragraph("TRIBUNAL DE JUSTIÇA DE SÃO PAULO")
+                                .setFont(fontBold)
+                                .setFontSize(16)
+                                .setTextAlignment(TextAlignment.LEFT))
+                        .setVerticalAlignment(VerticalAlignment.MIDDLE)
+                        .setBorder(null);
+
+                headerTable.addCell(logoCell);
+                headerTable.addCell(textCell);
+                document.add(headerTable);
+
+                logger.info("Cabeçalho com logo adicionado com sucesso");
+
+            } catch (IOException e) {
+                logger.warn("Não foi possível carregar o logo: {}", e.getMessage());
+                // Se não conseguir carregar o logo, usar apenas texto
+                document.add(new Paragraph("TRIBUNAL DE JUSTIÇA DE SÃO PAULO")
+                        .setFont(fontBold)
+                        .setFontSize(16)
+                        .setTextAlignment(TextAlignment.CENTER));
+            }
+
+        // Título da pauta
+        document.add(new Paragraph("PAUTA DE AUDIÊNCIAS")
+                .setFont(fontBold)
+                .setFontSize(18)
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginTop(10)
+                .setMarginBottom(10));
+
+        logger.info("Título da pauta adicionado");
+
+        // Nome da vara (se houver audiências)
+        if (!audiencias.isEmpty() && audiencias.get(0).getVara() != null) {
+            document.add(new Paragraph(audiencias.get(0).getVara().getNome())
+                    .setFont(fontBold)
+                    .setFontSize(14)
+                    .setTextAlignment(TextAlignment.CENTER)
+                    .setMarginBottom(5));
+            logger.info("Nome da vara adicionado: {}", audiencias.get(0).getVara().getNome());
+        }
+
+        // Data em destaque
+        document.add(new Paragraph("Data: " + data.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
+                .setFont(fontBold)
+                .setFontSize(12)
+                .setTextAlignment(TextAlignment.CENTER)
+                .setBackgroundColor(ColorConstants.LIGHT_GRAY)
+                .setPadding(5)
+                .setMarginBottom(20));
+
+        logger.info("Data adicionada ao PDF");
+
+        if (audiencias.isEmpty()) {
+            document.add(new Paragraph("Nenhuma audiência agendada para esta data.")
+                    .setFont(fontRegular)
+                    .setFontSize(12)
+                    .setTextAlignment(TextAlignment.CENTER)
+                    .setMarginTop(50));
+            logger.info("Mensagem de nenhuma audiência adicionada");
+        } else {
+            logger.info("Adicionando {} audiências ao PDF", audiencias.size());
+            for (int i = 0; i < audiencias.size(); i++) {
+                Audiencia audiencia = audiencias.get(i);
+                logger.info("Processando audiência {}/{}: ID {}", i + 1, audiencias.size(), audiencia.getId());
+                adicionarAudienciaNoPDF(document, audiencia, fontBold, fontRegular);
+            }
+        }
+
+        logger.info("Finalizando documento PDF");
+        document.close();
+        byte[] pdfBytes = baos.toByteArray();
+        logger.info("PDF gerado com sucesso. Tamanho: {} bytes", pdfBytes.length);
+        return pdfBytes;
+        
+        } catch (Exception e) {
+            logger.error("Erro durante a geração do PDF para a data {}: {}", data, e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    private void adicionarAudienciaNoPDF(Document document, Audiencia audiencia, PdfFont fontBold, PdfFont fontRegular) {
+        // Horário em destaque
+        document.add(new Paragraph("HORÁRIO: " + audiencia.getHorarioInicio().toString())
+                .setFont(fontBold)
+                .setFontSize(14)
+                .setBackgroundColor(ColorConstants.YELLOW)
+                .setPadding(5)
+                .setMarginBottom(10));
+
+        // Tabela com informações da audiência
+        Table table = new Table(UnitValue.createPercentArray(new float[]{30, 70}));
+        table.setWidth(UnitValue.createPercentValue(100));
+
+        // Processo
+        table.addCell(new Cell().add(new Paragraph("Processo:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getNumeroProcesso()).setFont(fontRegular)));
+
+        // Tipo
+        table.addCell(new Cell().add(new Paragraph("Tipo:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getTipoAudiencia() != null ? audiencia.getTipoAudiencia().toString() : "N/A").setFont(fontRegular)));
+
+        // Formato
+        table.addCell(new Cell().add(new Paragraph("Formato:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getFormato() != null ? audiencia.getFormato().toString() : "N/A").setFont(fontRegular)));
+
+        // Duração
+        table.addCell(new Cell().add(new Paragraph("Duração:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getDuracao() + " minutos").setFont(fontRegular)));
+
+        // Juiz
+        table.addCell(new Cell().add(new Paragraph("Juiz:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getJuiz() != null ? audiencia.getJuiz().getNome() : "N/A").setFont(fontRegular)));
+
+        // Promotor
+        table.addCell(new Cell().add(new Paragraph("Promotor:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getPromotor() != null ? audiencia.getPromotor().getNome() : "N/A").setFont(fontRegular)));
+
+        // Status
+        table.addCell(new Cell().add(new Paragraph("Status:").setFont(fontBold)));
+        table.addCell(new Cell().add(new Paragraph(audiencia.getStatus() != null ? audiencia.getStatus().toString() : "N/A").setFont(fontRegular)));
+
+        document.add(table);
+
+        // Participantes
+        List<ParticipacaoAudiencia> participacoes = participacaoService.buscarPorAudienciaId(audiencia.getId());
+        if (participacoes != null && !participacoes.isEmpty()) {
+            document.add(new Paragraph("PARTICIPANTES:")
+                    .setFont(fontBold)
+                    .setFontSize(12)
+                    .setMarginTop(10)
+                    .setMarginBottom(5));
+
+            Table participantesTable = new Table(UnitValue.createPercentArray(new float[]{50, 50}));
+            participantesTable.setWidth(UnitValue.createPercentValue(100));
+
+            participantesTable.addHeaderCell(new Cell().add(new Paragraph("Nome").setFont(fontBold)));
+            participantesTable.addHeaderCell(new Cell().add(new Paragraph("Papel").setFont(fontBold)));
+
+            for (ParticipacaoAudiencia participacao : participacoes) {
+                participantesTable.addCell(new Cell().add(new Paragraph(participacao.getPessoa().getNome()).setFont(fontRegular)));
+                participantesTable.addCell(new Cell().add(new Paragraph(participacao.getTipo() != null ? participacao.getTipo().toString() : "N/A").setFont(fontRegular)));
+            }
+
+            document.add(participantesTable);
+        }
+
+        // Separador entre audiências
+        document.add(new Paragraph("\n").setMarginBottom(20));
+    }
+}

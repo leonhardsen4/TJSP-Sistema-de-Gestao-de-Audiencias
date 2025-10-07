@@ -1,0 +1,253 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Variáveis CSS para cores do TJSP */
+:root {
+  --tjsp-blue-dark: #003366;
+  --tjsp-blue-medium: #0066cc;
+  --tjsp-blue-light: #004080;
+  --tjsp-blue-lighter: #e8f2ff;
+  --tjsp-blue-lightest: #f8fbff;
+  --tjsp-text-light: #7ba7d9;
+  --tjsp-success: #006600;
+  --tjsp-error: #cc0000;
+  --tjsp-warning: #cc6600;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f8fbff;
+  color: var(--tjsp-blue-dark);
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Animações */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-8px); }
+  75% { transform: translateX(8px); }
+}
+
+/* Estilos globais para mensagens */
+.success-message {
+  background: linear-gradient(135deg, #e6ffe6 0%, #ccffcc 100%);
+  color: var(--tjsp-success);
+  border: 2px solid #b3ffb3;
+  border-left: 4px solid var(--tjsp-success);
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 102, 0, 0.1);
+  animation: fadeIn 0.5s ease-out;
+}
+
+.error-message {
+  background: linear-gradient(135deg, #ffe6e6 0%, #ffcccc 100%);
+  color: var(--tjsp-error);
+  border: 2px solid #ffb3b3;
+  border-left: 4px solid var(--tjsp-error);
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(204, 0, 0, 0.1);
+  animation: shake 0.5s ease-in-out;
+}
+
+.warning-message {
+  background: linear-gradient(135deg, #fff3e6 0%, #ffe6cc 100%);
+  color: var(--tjsp-warning);
+  border: 2px solid #ffd9b3;
+  border-left: 4px solid var(--tjsp-warning);
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(204, 102, 0, 0.1);
+  animation: fadeIn 0.5s ease-out;
+}
+
+.info-message {
+  background: linear-gradient(135deg, var(--tjsp-blue-lighter) 0%, var(--tjsp-blue-lightest) 100%);
+  color: var(--tjsp-blue-medium);
+  border: 2px solid #b3d9ff;
+  border-left: 4px solid var(--tjsp-blue-medium);
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 102, 204, 0.1);
+  animation: fadeIn 0.5s ease-out;
+}
+
+/* Estilos para botões globais */
+.btn-tjsp-primary {
+  background: linear-gradient(135deg, var(--tjsp-blue-dark) 0%, var(--tjsp-blue-medium) 50%, var(--tjsp-blue-light) 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 16px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-tjsp-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.btn-tjsp-primary:hover:not(:disabled)::before {
+  left: 100%;
+}
+
+.btn-tjsp-primary:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(0, 51, 102, 0.3);
+}
+
+.btn-tjsp-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-tjsp-secondary {
+  background: none;
+  border: 2px solid var(--tjsp-blue-medium);
+  color: var(--tjsp-blue-medium);
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-tjsp-secondary:hover:not(:disabled) {
+  background: var(--tjsp-blue-medium);
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 102, 204, 0.2);
+}
+
+/* Estilos para inputs globais */
+.input-tjsp {
+  padding: 16px 20px;
+  border: 2px solid var(--tjsp-blue-lighter);
+  border-radius: 12px;
+  font-size: 16px;
+  transition: all 0.3s ease;
+  background-color: var(--tjsp-blue-lightest);
+  color: var(--tjsp-blue-dark);
+}
+
+.input-tjsp:focus {
+  outline: none;
+  border-color: var(--tjsp-blue-medium);
+  background-color: white;
+  box-shadow: 0 0 0 4px rgba(0, 102, 204, 0.1);
+  transform: translateY(-1px);
+}
+
+.input-tjsp::placeholder {
+  color: var(--tjsp-text-light);
+}
+
+/* Estilos para cards */
+.card-tjsp {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 51, 102, 0.1);
+  border: 1px solid rgba(0, 102, 204, 0.1);
+  transition: all 0.3s ease;
+}
+
+.card-tjsp:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 25px 70px rgba(0, 51, 102, 0.15);
+}
+
+/* Scrollbar personalizada */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--tjsp-blue-lightest);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--tjsp-text-light);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tjsp-blue-medium);
+}
+
+/* Responsividade global */
+@media (max-width: 768px) {
+  .btn-tjsp-primary,
+  .btn-tjsp-secondary {
+    font-size: 14px;
+    padding: 14px 20px;
+  }
+  
+  .input-tjsp {
+    font-size: 15px;
+    padding: 14px 16px;
+  }
+}
+
+/* Utilitários */
+.text-tjsp-primary { color: var(--tjsp-blue-dark); }
+.text-tjsp-secondary { color: var(--tjsp-blue-medium); }
+.text-tjsp-light { color: var(--tjsp-text-light); }
+.bg-tjsp-primary { background-color: var(--tjsp-blue-dark); }
+.bg-tjsp-secondary { background-color: var(--tjsp-blue-medium); }
+.bg-tjsp-light { background-color: var(--tjsp-blue-lightest); }
