@@ -10,11 +10,16 @@ import {
   HomeIcon,
   Bars3Icon,
   XMarkIcon,
-  ArrowRightOnRectangleIcon
+  ArrowRightOnRectangleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  BuildingOfficeIcon,
+  ClockIcon
 } from '@heroicons/react/24/outline';
 
 const Layout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const { usuario, logout } = useAuth();
 
@@ -24,10 +29,10 @@ const Layout: React.FC = () => {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: HomeIcon },
-    { name: 'Audiências', href: '/audiencias', icon: CalendarIcon },
+    { name: 'Audiências', href: '/audiencias', icon: ClockIcon },
     { name: 'Horários Livres', href: '/audiencias/horarios-livres', icon: CalendarIcon },
-    { name: 'Varas', href: '/varas', icon: ScaleIcon },
-    { name: 'Juízes', href: '/juizes', icon: UserIcon },
+    { name: 'Varas', href: '/varas', icon: BuildingOfficeIcon },
+    { name: 'Juízes', href: '/juizes', icon: ScaleIcon },
     { name: 'Promotores', href: '/promotores', icon: UserIcon },
     { name: 'Advogados', href: '/advogados', icon: BriefcaseIcon },
     { name: 'Pessoas', href: '/pessoas', icon: UserGroupIcon },
@@ -98,11 +103,13 @@ const Layout: React.FC = () => {
 
       {/* Desktop sidebar */}
       <div className="hidden md:flex md:flex-shrink-0">
-        <div className="flex flex-col w-64">
+        <div className={`flex flex-col transition-all duration-300 ${sidebarCollapsed ? 'w-16' : 'w-64'}`}>
           <div className="flex flex-col h-0 flex-1">
-            <div className="flex items-center h-16 flex-shrink-0 px-4 bg-tjsp-red">
-              <img src="/tjsp_logo.png" alt="TJSP Logo" className="h-10 w-10 mr-3" />
-              <h1 className="text-xl font-bold text-white">TJSP Audiências</h1>
+            <div className={`flex items-center h-16 flex-shrink-0 px-4 bg-tjsp-red ${sidebarCollapsed ? 'justify-center' : ''}`}>
+              <img src="/tjsp_logo.png" alt="TJSP Logo" className="h-10 w-10" />
+              {!sidebarCollapsed && (
+                <h1 className="text-xl font-bold text-white ml-3">TJSP Audiências</h1>
+              )}
             </div>
             <div className="flex-1 flex flex-col overflow-y-auto bg-tjsp-red">
               <nav className="flex-1 px-2 py-4 space-y-1">
@@ -114,16 +121,37 @@ const Layout: React.FC = () => {
                       isActive(item.href)
                         ? 'bg-tjsp-dark text-white'
                         : 'text-gray-300 hover:bg-tjsp-dark hover:text-white'
-                    } group flex items-center px-2 py-2 text-sm font-medium rounded-md`}
+                    } group flex items-center px-2 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
+                      sidebarCollapsed ? 'justify-center' : ''
+                    }`}
+                    title={sidebarCollapsed ? item.name : ''}
                   >
                     <item.icon
-                      className="mr-3 flex-shrink-0 h-6 w-6 text-gray-300"
+                      className={`flex-shrink-0 h-6 w-6 text-gray-300 ${sidebarCollapsed ? '' : 'mr-3'}`}
                       aria-hidden="true"
                     />
-                    {item.name}
+                    {!sidebarCollapsed && item.name}
                   </Link>
                 ))}
               </nav>
+              
+              {/* Botão de recolher/expandir */}
+              <div className="px-2 pb-4">
+                <button
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className="w-full flex items-center justify-center px-2 py-2 text-gray-300 hover:bg-tjsp-dark hover:text-white rounded-md transition-colors"
+                  title={sidebarCollapsed ? "Expandir menu" : "Recolher menu"}
+                >
+                  {sidebarCollapsed ? (
+                    <ChevronRightIcon className="h-6 w-6" />
+                  ) : (
+                    <>
+                      <ChevronLeftIcon className="h-6 w-6 mr-3" />
+                      <span className="text-sm">Recolher</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

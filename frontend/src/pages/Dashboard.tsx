@@ -201,7 +201,7 @@ const Dashboard: React.FC = () => {
             className="flex items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-colors"
           >
             <div className="text-center">
-              <div className="text-2xl mb-2">👨‍⚖️</div>
+              <div className="text-2xl mb-2">⚖️</div>
               <span className="text-sm font-medium text-gray-700">Novo Juiz</span>
             </div>
           </Link>
@@ -219,7 +219,7 @@ const Dashboard: React.FC = () => {
             className="flex items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-orange-500 hover:bg-orange-50 transition-colors"
           >
             <div className="text-center">
-              <div className="text-2xl mb-2">👨‍💼</div>
+              <div className="text-2xl mb-2">👨‍⚖️</div>
               <span className="text-sm font-medium text-gray-700">Novo Promotor</span>
             </div>
           </Link>
@@ -228,7 +228,7 @@ const Dashboard: React.FC = () => {
             className="flex items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-lg hover:border-red-500 hover:bg-red-50 transition-colors"
           >
             <div className="text-center">
-              <div className="text-2xl mb-2">⚖️</div>
+              <div className="text-2xl mb-2">💼</div>
               <span className="text-sm font-medium text-gray-700">Novo Advogado</span>
             </div>
           </Link>
