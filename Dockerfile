@@ -9,7 +9,8 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build do Backend
-FROM maven:3.9-openjdk-17-slim AS backend-build
+#FROM maven:3.9-openjdk-17-slim AS backend-build
+FROM maven:3.9-eclipse-temurin-17 AS backend-build
 WORKDIR /app
 COPY pom.xml ./
 COPY src ./src
