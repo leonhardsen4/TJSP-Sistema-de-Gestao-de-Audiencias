@@ -1,0 +1,13 @@
+{
+  "name": "tjsp-audiencias-system",
+  "version": "1.0.0",
+  "description": "TJSP Sistema de Gestão de Audiências",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "heroku-postbuild": "cd frontend && npm install && npm run build"
+  },
+  "engines": {
+    "node": "18.x",
+    "npm": "9.x"
+  }
+}

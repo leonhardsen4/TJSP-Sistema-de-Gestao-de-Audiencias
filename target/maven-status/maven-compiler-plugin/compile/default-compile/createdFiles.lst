@@ -1,5 +1,6 @@
 br\jus\tjsp\audiencias\exception\GlobalExceptionHandler.class
 br\jus\tjsp\audiencias\model\enums\StatusAudiencia.class
+br\jus\tjsp\audiencias\repository\UsuarioRepository.class
 br\jus\tjsp\audiencias\service\VaraService.class
 br\jus\tjsp\audiencias\model\enums\TipoRepresentacao.class
 br\jus\tjsp\audiencias\model\enums\Competencia.class
@@ -15,10 +16,13 @@ br\jus\tjsp\audiencias\model\enums\TipoParticipacao.class
 br\jus\tjsp\audiencias\model\Juiz.class
 br\jus\tjsp\audiencias\controller\PautaController.class
 br\jus\tjsp\audiencias\repository\ParticipacaoAudienciaRepository.class
+br\jus\tjsp\audiencias\model\Usuario.class
+br\jus\tjsp\audiencias\service\UsuarioService.class
 br\jus\tjsp\audiencias\repository\JuizRepository.class
 br\jus\tjsp\audiencias\controller\AdvogadoController.class
 br\jus\tjsp\audiencias\controller\ParticipacaoAudienciaController.class
 br\jus\tjsp\audiencias\service\PromotorService.class
+br\jus\tjsp\audiencias\controller\UsuarioController.class
 br\jus\tjsp\audiencias\repository\PromotorRepository.class
 br\jus\tjsp\audiencias\controller\PessoaController.class
 br\jus\tjsp\audiencias\service\PautaServiceMinimal.class
@@ -42,6 +46,7 @@ br\jus\tjsp\audiencias\model\ParticipacaoAudiencia.class
 br\jus\tjsp\audiencias\model\Pessoa.class
 br\jus\tjsp\audiencias\service\ParticipacaoAudienciaService.class
 br\jus\tjsp\audiencias\dto\AudienciaDTO.class
+br\jus\tjsp\audiencias\service\EmailService.class
 br\jus\tjsp\audiencias\controller\RepresentacaoAdvogadoController.class
 br\jus\tjsp\audiencias\repository\PessoaRepository.class
 br\jus\tjsp\audiencias\service\PautaServiceOpenPDF.class
