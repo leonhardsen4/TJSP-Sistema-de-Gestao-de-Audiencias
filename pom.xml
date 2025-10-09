@@ -49,14 +49,7 @@
             <version>1.3.30</version>
         </dependency>
         
-        <!-- PostgreSQL para produção -->
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        
-        <!-- H2 para desenvolvimento local -->
+        <!-- H2 para desenvolvimento e produção -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
