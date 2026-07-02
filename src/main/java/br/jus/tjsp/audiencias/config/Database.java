@@ -1,0 +1,242 @@
+package br.jus.tjsp.audiencias.config;
+
+import org.sqlite.SQLiteConfig;
+import org.sqlite.SQLiteDataSource;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+/**
+ * Ponto único de acesso ao banco de dados SQLite.
+ *
+ * <p>Responsável por inicializar o arquivo do banco, aplicar o esquema
+ * ({@code schema.sql} no classpath) e oferecer métodos utilitários de
+ * consulta e atualização via JDBC, dispensando qualquer framework de
+ * persistência.</p>
+ */
+public final class Database {
+
+    /** Fonte de conexões SQLite configurada em {@link #init(String)}. */
+    private static SQLiteDataSource dataSource;
+
+    private Database() {
+        // Classe utilitária: não instanciável.
+    }
+
+    /**
+     * Mapeia uma linha de {@link ResultSet} para um objeto.
+     *
+     * @param <T> tipo do objeto resultante
+     */
+    @FunctionalInterface
+    public interface RowMapper<T> {
+        /**
+         * Converte a linha atual do {@code ResultSet} em um objeto.
+         *
+         * @param rs result set posicionado na linha a mapear
+         * @return objeto mapeado
+         * @throws SQLException se a leitura de alguma coluna falhar
+         */
+        T map(ResultSet rs) throws SQLException;
+    }
+
+    /**
+     * Inicializa o banco de dados: cria o diretório do arquivo se preciso,
+     * configura o SQLite (chaves estrangeiras ativas, modo WAL, tempo de
+     * espera de bloqueio) e executa o {@code schema.sql}.
+     *
+     * @param caminhoArquivo caminho do arquivo do banco (ex.: {@code data/tjsp_audiencias.db})
+     */
+    public static synchronized void init(String caminhoArquivo) {
+        try {
+            Path caminho = Path.of(caminhoArquivo).toAbsolutePath();
+            if (caminho.getParent() != null) {
+                Files.createDirectories(caminho.getParent());
+            }
+            SQLiteConfig config = new SQLiteConfig();
+            config.enforceForeignKeys(true);
+            config.setJournalMode(SQLiteConfig.JournalMode.WAL);
+            config.setBusyTimeout(5000);
+
+            SQLiteDataSource ds = new SQLiteDataSource(config);
+            ds.setUrl("jdbc:sqlite:" + caminho);
+            dataSource = ds;
+
+            executarSchema();
+        } catch (IOException | SQLException e) {
+            throw new IllegalStateException("Falha ao inicializar o banco de dados: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa o script {@code schema.sql} presente no classpath,
+     * criando as tabelas e índices que ainda não existirem.
+     *
+     * @throws SQLException se algum comando do script falhar
+     */
+    private static void executarSchema() throws SQLException {
+        String script;
+        try (InputStream in = Database.class.getResourceAsStream("/schema.sql")) {
+            if (in == null) {
+                throw new IllegalStateException("schema.sql não encontrado no classpath");
+            }
+            script = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))
+                    .lines().collect(Collectors.joining("\n"));
+        } catch (IOException e) {
+            throw new IllegalStateException("Falha ao ler schema.sql", e);
+        }
+        try (Connection conn = getConnection(); Statement st = conn.createStatement()) {
+            for (String comando : script.split(";")) {
+                String sql = comando.strip();
+                if (!sql.isEmpty()) {
+                    st.execute(sql);
+                }
+            }
+        }
+    }
+
+    /**
+     * Obtém uma conexão nova com o banco.
+     *
+     * @return conexão JDBC pronta para uso (deve ser fechada pelo chamador)
+     * @throws SQLException se a conexão não puder ser aberta
+     */
+    public static Connection getConnection() throws SQLException {
+        if (dataSource == null) {
+            throw new IllegalStateException("Database.init() ainda não foi chamado");
+        }
+        return dataSource.getConnection();
+    }
+
+    /**
+     * Executa uma consulta e mapeia todas as linhas do resultado.
+     *
+     * @param sql    comando SQL com marcadores {@code ?}
+     * @param mapper conversor de linha para objeto
+     * @param params valores dos marcadores, na ordem
+     * @param <T>    tipo dos objetos retornados
+     * @return lista (possivelmente vazia) com as linhas mapeadas
+     */
+    public static <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
+        List<T> resultado = new ArrayList<>();
+        try (Connection conn = getConnection(); PreparedStatement st = preparar(conn, sql, params);
+             ResultSet rs = st.executeQuery()) {
+            while (rs.next()) {
+                resultado.add(mapper.map(rs));
+            }
+            return resultado;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro na consulta SQL: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa uma consulta que retorna no máximo uma linha.
+     *
+     * @param sql    comando SQL com marcadores {@code ?}
+     * @param mapper conversor de linha para objeto
+     * @param params valores dos marcadores, na ordem
+     * @param <T>    tipo do objeto retornado
+     * @return a linha mapeada, ou vazio se a consulta não retornar nada
+     */
+    public static <T> Optional<T> queryOne(String sql, RowMapper<T> mapper, Object... params) {
+        List<T> lista = query(sql, mapper, params);
+        return lista.isEmpty() ? Optional.empty() : Optional.of(lista.get(0));
+    }
+
+    /**
+     * Executa um comando de escrita (INSERT, UPDATE ou DELETE).
+     *
+     * @param sql    comando SQL com marcadores {@code ?}
+     * @param params valores dos marcadores, na ordem
+     * @return quantidade de linhas afetadas
+     */
+    public static int update(String sql, Object... params) {
+        try (Connection conn = getConnection(); PreparedStatement st = preparar(conn, sql, params)) {
+            return st.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro no comando SQL: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa um INSERT e retorna a chave primária gerada.
+     *
+     * @param sql    comando INSERT com marcadores {@code ?}
+     * @param params valores dos marcadores, na ordem
+     * @return id gerado pelo banco para a nova linha
+     */
+    public static long insert(String sql, Object... params) {
+        try (Connection conn = getConnection();
+             PreparedStatement st = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            aplicarParametros(st, params);
+            st.executeUpdate();
+            try (ResultSet chaves = st.getGeneratedKeys()) {
+                if (chaves.next()) {
+                    return chaves.getLong(1);
+                }
+            }
+            throw new IllegalStateException("INSERT não retornou chave gerada");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro no INSERT: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa uma consulta de contagem ({@code SELECT COUNT(...)}).
+     *
+     * @param sql    comando SQL cuja primeira coluna é um número
+     * @param params valores dos marcadores, na ordem
+     * @return valor da contagem
+     */
+    public static long count(String sql, Object... params) {
+        return queryOne(sql, rs -> rs.getLong(1), params).orElse(0L);
+    }
+
+    /**
+     * Prepara um statement aplicando os parâmetros informados.
+     *
+     * @param conn   conexão em uso
+     * @param sql    comando SQL
+     * @param params valores dos marcadores
+     * @return statement pronto para execução
+     * @throws SQLException se a preparação falhar
+     */
+    private static PreparedStatement preparar(Connection conn, String sql, Object... params) throws SQLException {
+        PreparedStatement st = conn.prepareStatement(sql);
+        aplicarParametros(st, params);
+        return st;
+    }
+
+    /**
+     * Define os valores dos marcadores {@code ?} de um statement.
+     *
+     * @param st     statement alvo
+     * @param params valores na ordem dos marcadores
+     * @throws SQLException se algum valor não puder ser definido
+     */
+    private static void aplicarParametros(PreparedStatement st, Object... params) throws SQLException {
+        for (int i = 0; i < params.length; i++) {
+            Object p = params[i];
+            if (p instanceof Boolean b) {
+                st.setInt(i + 1, b ? 1 : 0);
+            } else {
+                st.setObject(i + 1, p);
+            }
+        }
+    }
+}

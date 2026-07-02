@@ -1,59 +1,33 @@
 package br.jus.tjsp.audiencias.service;
 
-import br.jus.tjsp.audiencias.repository.AudienciaRepository;
-import br.jus.tjsp.audiencias.repository.VaraRepository;
-import br.jus.tjsp.audiencias.repository.JuizRepository;
-import br.jus.tjsp.audiencias.repository.PromotorRepository;
-import br.jus.tjsp.audiencias.repository.AdvogadoRepository;
-import br.jus.tjsp.audiencias.repository.PessoaRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
+import br.jus.tjsp.audiencias.config.Database;
 
 import java.time.LocalDate;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Service
+/**
+ * Calcula as métricas exibidas no dashboard do sistema.
+ */
 public class EstatisticasService {
 
-    private final AudienciaRepository audienciaRepository;
-    private final VaraRepository varaRepository;
-    private final JuizRepository juizRepository;
-    private final PromotorRepository promotorRepository;
-    private final AdvogadoRepository advogadoRepository;
-    private final PessoaRepository pessoaRepository;
-
-    @Autowired
-    public EstatisticasService(AudienciaRepository audienciaRepository,
-                              VaraRepository varaRepository,
-                              JuizRepository juizRepository,
-                              PromotorRepository promotorRepository,
-                              AdvogadoRepository advogadoRepository,
-                              PessoaRepository pessoaRepository) {
-        this.audienciaRepository = audienciaRepository;
-        this.varaRepository = varaRepository;
-        this.juizRepository = juizRepository;
-        this.promotorRepository = promotorRepository;
-        this.advogadoRepository = advogadoRepository;
-        this.pessoaRepository = pessoaRepository;
-    }
-
-    public Map<String, Long> obterEstatisticasDashboard() {
-        Map<String, Long> estatisticas = new HashMap<>();
-        
-        // Contar total de registros
-        estatisticas.put("totalAudiencias", audienciaRepository.count());
-        estatisticas.put("totalVaras", varaRepository.count());
-        estatisticas.put("totalJuizes", juizRepository.count());
-        estatisticas.put("totalPromotores", promotorRepository.count());
-        estatisticas.put("totalAdvogados", advogadoRepository.count());
-        estatisticas.put("totalPessoas", pessoaRepository.count());
-        
-        // Contar audiências de hoje
-        LocalDate hoje = LocalDate.now();
-        long audienciasHoje = audienciaRepository.findByDataAudiencia(hoje).size();
-        estatisticas.put("audienciasHoje", audienciasHoje);
-        
-        return estatisticas;
+    /**
+     * Monta o resumo do dashboard: totais por entidade e a quantidade de
+     * audiências marcadas para hoje.
+     *
+     * @return mapa {@code {totalAudiencias, audienciasHoje, totalVaras,
+     *         totalJuizes, totalPromotores, totalAdvogados, totalPessoas}}
+     */
+    public Map<String, Object> resumoDashboard() {
+        Map<String, Object> resumo = new LinkedHashMap<>();
+        resumo.put("totalAudiencias", Database.count("SELECT COUNT(*) FROM audiencia"));
+        resumo.put("audienciasHoje", Database.count(
+                "SELECT COUNT(*) FROM audiencia WHERE data_audiencia = ?", LocalDate.now().toString()));
+        resumo.put("totalVaras", Database.count("SELECT COUNT(*) FROM vara"));
+        resumo.put("totalJuizes", Database.count("SELECT COUNT(*) FROM juiz"));
+        resumo.put("totalPromotores", Database.count("SELECT COUNT(*) FROM promotor"));
+        resumo.put("totalAdvogados", Database.count("SELECT COUNT(*) FROM advogado"));
+        resumo.put("totalPessoas", Database.count("SELECT COUNT(*) FROM pessoa"));
+        return resumo;
     }
 }
