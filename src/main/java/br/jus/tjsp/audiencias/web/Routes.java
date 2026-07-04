@@ -3,8 +3,12 @@ package br.jus.tjsp.audiencias.web;
 import br.jus.tjsp.audiencias.dao.CrudDao;
 import br.jus.tjsp.audiencias.service.AudienciaService;
 import br.jus.tjsp.audiencias.service.EstatisticasService;
+import br.jus.tjsp.audiencias.service.ExportacaoService;
+import br.jus.tjsp.audiencias.service.MandadoService;
 import br.jus.tjsp.audiencias.service.ParticipacaoService;
+import br.jus.tjsp.audiencias.service.PautaPdfService;
 import br.jus.tjsp.audiencias.service.PautaService;
+import br.jus.tjsp.audiencias.service.PendenciaService;
 import br.jus.tjsp.audiencias.service.UsuarioService;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
@@ -27,7 +31,7 @@ public final class Routes {
 
     /** DAO das varas. */
     private static final CrudDao VARAS = new CrudDao("vara",
-            List.of("nome", "comarca", "endereco", "telefone", "email", "observacoes"), List.of("nome"));
+            List.of("nome", "comarca", "endereco", "telefone", "email", "cor", "observacoes"), List.of("nome"));
 
     /** DAO dos juízes. */
     private static final CrudDao JUIZES = new CrudDao("juiz",
@@ -59,7 +63,11 @@ public final class Routes {
         ParticipacaoService participacoes = new ParticipacaoService();
         UsuarioService usuarios = new UsuarioService();
         EstatisticasService estatisticas = new EstatisticasService();
-        PautaService pauta = new PautaService(audiencias, participacoes);
+        PautaPdfService pautaPdf = new PautaPdfService(audiencias, participacoes);
+        PautaService pautas = new PautaService();
+        MandadoService mandados = new MandadoService();
+        PendenciaService pendencias = new PendenciaService();
+        ExportacaoService exportacao = new ExportacaoService();
 
         for (String prefixo : new String[]{"", "/api"}) {
             registrarCrud(app, prefixo + "/varas", VARAS);
@@ -68,16 +76,27 @@ public final class Routes {
             registrarCrud(app, prefixo + "/advogados", ADVOGADOS);
             registrarCrud(app, prefixo + "/pessoas", PESSOAS);
             registrarBuscasEspecificas(app, prefixo);
-            registrarAudiencias(app, prefixo, audiencias, participacoes);
+            registrarPautas(app, prefixo, pautas, audiencias, pautaPdf);
+            registrarAudiencias(app, prefixo, audiencias, participacoes, exportacao);
             registrarUsuarios(app, prefixo, usuarios);
+            registrarMandadosEPendencias(app, prefixo, mandados, pendencias);
 
             app.get(prefixo + "/estatisticas/dashboard", ctx -> ctx.json(estatisticas.resumoDashboard()));
 
             app.get(prefixo + "/pauta/pdf", ctx -> {
-                LocalDate data = AudienciaService.parseData(ctx.queryParam("data"));
-                byte[] pdf = pauta.gerarPautaPdf(data);
+                byte[] pdf;
+                String data = ctx.queryParam("data");
+                if (data != null && !data.isBlank()) {
+                    // Forma antiga: relatório de um único dia.
+                    pdf = pautaPdf.gerarPautaPdf(AudienciaService.parseData(data));
+                } else {
+                    // Relatório geral com os filtros da tela de listagem.
+                    pdf = pautaPdf.gerarPautaPdf(ctx.queryParam("competencia"), ctx.queryParam("varaId"),
+                            ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"), ctx.queryParam("status"),
+                            ctx.queryParam("tipoAudiencia"), ctx.queryParam("q"));
+                }
                 ctx.contentType("application/pdf");
-                ctx.header("Content-Disposition", "inline; filename=pauta_" + data + ".pdf");
+                ctx.header("Content-Disposition", "inline; filename=pauta.pdf");
                 ctx.result(pdf);
             });
         }
@@ -136,12 +155,15 @@ public final class Routes {
      * @param prefixo       {@code ""} ou {@code "/api"}
      * @param audiencias    serviço de audiências
      * @param participacoes serviço de participantes
+     * @param exportacao    serviço de exportação (planilha e PDF paisagem)
      */
-    private static void registrarAudiencias(Javalin app, String prefixo,
-                                            AudienciaService audiencias, ParticipacaoService participacoes) {
+    private static void registrarAudiencias(Javalin app, String prefixo, AudienciaService audiencias,
+                                            ParticipacaoService participacoes, ExportacaoService exportacao) {
         String base = prefixo + "/audiencias";
 
-        app.get(base, ctx -> ctx.json(audiencias.listar(ctx.queryParam("competencia"))));
+        app.get(base, ctx -> ctx.json(audiencias.listar(ctx.queryParam("competencia"),
+                ctx.queryParam("varaId"), ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"),
+                ctx.queryParam("status"), ctx.queryParam("tipoAudiencia"), ctx.queryParam("q"))));
         app.get(base + "/por-competencia", ctx -> ctx.json(audiencias.listar(ctx.queryParam("competencia"))));
         app.get(base + "/data", ctx ->
                 ctx.json(audiencias.listarPorData(AudienciaService.parseData(ctx.queryParam("data")))));
@@ -162,7 +184,26 @@ public final class Routes {
                 obrigatorio(ctx, "horarioInicioMinimo"),
                 obrigatorio(ctx, "horarioFimMaximo"))));
 
-        app.post(base, ctx -> ctx.status(201).json(audiencias.criar(corpo(ctx))));
+        // Exportações da lista (respeitam os mesmos filtros da listagem).
+        app.get(base + "/exportar/csv", ctx -> {
+            byte[] csv = exportacao.gerarCsv(audiencias.listar(ctx.queryParam("competencia"),
+                    ctx.queryParam("varaId"), ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"),
+                    ctx.queryParam("status"), ctx.queryParam("tipoAudiencia"), ctx.queryParam("q")));
+            ctx.contentType("text/csv; charset=UTF-8");
+            ctx.header("Content-Disposition", "attachment; filename=audiencias.csv");
+            ctx.result(csv);
+        });
+        app.get(base + "/exportar/pdf", ctx -> {
+            byte[] pdf = exportacao.gerarPdfPaisagem(audiencias.listar(ctx.queryParam("competencia"),
+                    ctx.queryParam("varaId"), ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"),
+                    ctx.queryParam("status"), ctx.queryParam("tipoAudiencia"), ctx.queryParam("q")));
+            ctx.contentType("application/pdf");
+            ctx.header("Content-Disposition", "inline; filename=audiencias.pdf");
+            ctx.result(pdf);
+        });
+
+        // Não há POST /audiencias avulso: audiências nascem somente dentro de
+        // uma pauta, via POST /pautas/{id}/audiencias (fluxo do fórum).
         app.get(base + "/{id}", ctx -> ctx.json(audiencias.buscarPorId(idDaRota(ctx))));
         app.put(base + "/{id}", ctx -> ctx.json(audiencias.atualizar(idDaRota(ctx), corpo(ctx))));
         app.delete(base + "/{id}", ctx -> {
@@ -181,6 +222,62 @@ public final class Routes {
             participacoes.remover(idDaRota(ctx), Long.parseLong(ctx.pathParam("participanteId")));
             ctx.status(204);
         });
+    }
+
+    /**
+     * Registra as rotas das pautas de audiências: CRUD, audiências da
+     * pauta (listagem e criação com herança rígida de data/vara/juiz/
+     * promotor) e impressão simplificada em PDF.
+     *
+     * @param app        instância do Javalin
+     * @param prefixo    {@code ""} ou {@code "/api"}
+     * @param pautas     serviço de pautas
+     * @param audiencias serviço de audiências
+     * @param pautaPdf   gerador de PDF
+     */
+    private static void registrarPautas(Javalin app, String prefixo, PautaService pautas,
+                                        AudienciaService audiencias, PautaPdfService pautaPdf) {
+        String base = prefixo + "/pautas";
+
+        app.get(base, ctx -> ctx.json(pautas.listar(ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"),
+                ctx.queryParam("varaId"), ctx.queryParam("q"))));
+        app.post(base, ctx -> ctx.status(201).json(pautas.criar(corpo(ctx))));
+        app.get(base + "/{id}", ctx -> ctx.json(pautas.buscarPorId(idDaRota(ctx))));
+        app.put(base + "/{id}", ctx -> ctx.json(pautas.atualizar(idDaRota(ctx), corpo(ctx))));
+        app.delete(base + "/{id}", ctx -> {
+            pautas.excluir(idDaRota(ctx));
+            ctx.status(204);
+        });
+
+        app.get(base + "/{id}/audiencias", ctx -> ctx.json(audiencias.listarPorPauta(idDaRota(ctx))));
+        app.post(base + "/{id}/audiencias",
+                ctx -> ctx.status(201).json(audiencias.criarNaPauta(idDaRota(ctx), corpo(ctx))));
+
+        app.get(base + "/{id}/pdf", ctx -> {
+            long id = idDaRota(ctx);
+            byte[] pdf = pautaPdf.gerarPdfDaPauta(pautas.buscarPorId(id), audiencias.listarPorPauta(id));
+            ctx.contentType("application/pdf");
+            ctx.header("Content-Disposition", "inline; filename=pauta_" + id + ".pdf");
+            ctx.result(pdf);
+        });
+    }
+
+    /**
+     * Registra as rotas do controle de mandados de intimação e do
+     * levantamento de pendências das audiências futuras.
+     *
+     * @param app        instância do Javalin
+     * @param prefixo    {@code ""} ou {@code "/api"}
+     * @param mandados   serviço de mandados
+     * @param pendencias serviço de pendências
+     */
+    private static void registrarMandadosEPendencias(Javalin app, String prefixo,
+                                                     MandadoService mandados, PendenciaService pendencias) {
+        app.get(prefixo + "/mandados", ctx -> ctx.json(mandados.listar(
+                ctx.queryParam("varaId"), ctx.queryParam("dataInicio"), ctx.queryParam("dataFim"),
+                ctx.queryParam("statusMandado"), ctx.queryParam("intimado"), ctx.queryParam("q"))));
+        app.put(prefixo + "/mandados/{id}", ctx -> ctx.json(mandados.atualizar(idDaRota(ctx), corpo(ctx))));
+        app.get(prefixo + "/pendencias", ctx -> ctx.json(pendencias.listarPendencias()));
     }
 
     /**

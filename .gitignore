@@ -1,6 +1,7 @@
 # Build
 target/
 frontend/build/
+dependency-reduced-pom.xml
 
 # Dependências
 frontend/node_modules/

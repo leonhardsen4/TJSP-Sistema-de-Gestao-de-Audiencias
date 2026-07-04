@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard';
 import AudienciasList from './pages/audiencias/AudienciasList';
 import AudienciasForm from './pages/audiencias/AudienciasForm';
 import AudienciasDetail from './pages/audiencias/AudienciasDetail';
-import HorariosLivres from './pages/audiencias/HorariosLivres';
 import VarasList from './pages/varas/VarasList';
 import VarasForm from './pages/varas/VarasForm';
 import VarasDetail from './pages/varas/VarasDetail';
@@ -23,6 +22,10 @@ import AdvogadosDetail from './pages/advogados/AdvogadosDetail';
 import PessoasList from './pages/pessoas/PessoasList';
 import PessoasForm from './pages/pessoas/PessoasForm';
 import PessoasDetail from './pages/pessoas/PessoasDetail';
+import MandadosList from './pages/mandados/MandadosList';
+import PautasList from './pages/pautas/PautasList';
+import PautaForm from './pages/pautas/PautaForm';
+import PautaDetail from './pages/pautas/PautaDetail';
 
 function App() {
   return (
@@ -33,10 +36,15 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Dashboard />} />
               <Route path="audiencias" element={<AudienciasList />} />
-              <Route path="audiencias/nova" element={<AudienciasForm />} />
               <Route path="audiencias/editar/:id" element={<AudienciasForm />} />
-              <Route path="audiencias/horarios-livres" element={<HorariosLivres />} />
               <Route path="audiencias/:id" element={<AudienciasDetail />} />
+              {/* Audiência nova nasce sempre dentro de uma pauta */}
+              <Route path="pautas" element={<PautasList />} />
+              <Route path="pautas/nova" element={<PautaForm />} />
+              <Route path="pautas/editar/:id" element={<PautaForm />} />
+              <Route path="pautas/:pautaId/audiencias/nova" element={<AudienciasForm />} />
+              <Route path="pautas/:id" element={<PautaDetail />} />
+              <Route path="mandados" element={<MandadosList />} />
               <Route path="varas" element={<VarasList />} />
               <Route path="varas/nova" element={<VarasForm />} />
               <Route path="varas/editar/:id" element={<VarasForm />} />

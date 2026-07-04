@@ -5,6 +5,7 @@ import br.jus.tjsp.audiencias.model.enums.Competencia;
 import br.jus.tjsp.audiencias.model.enums.FormatoAudiencia;
 import br.jus.tjsp.audiencias.model.enums.StatusAudiencia;
 import br.jus.tjsp.audiencias.model.enums.TipoAudiencia;
+import br.jus.tjsp.audiencias.util.Textos;
 import br.jus.tjsp.audiencias.web.ApiException;
 
 import java.sql.ResultSet;
@@ -84,11 +85,73 @@ public class AudienciaService {
      * @return audiências ordenadas por data e horário
      */
     public List<Map<String, Object>> listar(String competencia) {
-        if (competencia == null || competencia.isBlank()) {
-            return Database.query(SELECT_BASE + " ORDER BY a.data_audiencia, a.horario_inicio", this::mapear);
+        return listar(competencia, null, null, null, null, null, null);
+    }
+
+    /**
+     * Lista as audiências aplicando os filtros informados (todos opcionais).
+     * É a consulta usada pela tela de listagem e pela pauta em PDF.
+     *
+     * @param competencia   competência da audiência
+     * @param varaId        vara da audiência
+     * @param dataInicio    primeira data do período ({@code yyyy-MM-dd} ou {@code dd/MM/yyyy})
+     * @param dataFim       última data do período
+     * @param status        status da audiência
+     * @param tipoAudiencia tipo da audiência
+     * @param texto         trecho do número do processo, artigo ou observações
+     * @return audiências ordenadas por data e horário
+     */
+    public List<Map<String, Object>> listar(String competencia, String varaId, String dataInicio, String dataFim,
+                                            String status, String tipoAudiencia, String texto) {
+        StringBuilder sql = new StringBuilder(SELECT_BASE).append(" WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+
+        if (naoVazio(competencia)) {
+            sql.append(" AND a.competencia = ?");
+            params.add(competencia);
         }
-        return Database.query(SELECT_BASE + " WHERE a.competencia = ? ORDER BY a.data_audiencia, a.horario_inicio",
-                this::mapear, competencia);
+        if (naoVazio(varaId)) {
+            sql.append(" AND a.vara_id = ?");
+            params.add(Long.parseLong(varaId));
+        }
+        if (naoVazio(dataInicio)) {
+            sql.append(" AND a.data_audiencia >= ?");
+            params.add(parseData(dataInicio).toString());
+        }
+        if (naoVazio(dataFim)) {
+            sql.append(" AND a.data_audiencia <= ?");
+            params.add(parseData(dataFim).toString());
+        }
+        if (naoVazio(status)) {
+            sql.append(" AND a.status = ?");
+            params.add(status);
+        }
+        if (naoVazio(tipoAudiencia)) {
+            sql.append(" AND a.tipo_audiencia = ?");
+            params.add(tipoAudiencia);
+        }
+        if (naoVazio(texto)) {
+            // O UPPER() do SQLite só cobre ASCII; a conversão do termo é
+            // feita no Java para que acentos também casem.
+            sql.append(" AND (a.numero_processo LIKE ? OR UPPER(COALESCE(a.artigo, '')) LIKE ?"
+                    + " OR UPPER(COALESCE(a.observacoes, '')) LIKE ?)");
+            params.add("%" + texto.strip() + "%");
+            String termoMaiusculo = "%" + Textos.maiusculas(texto) + "%";
+            params.add(termoMaiusculo);
+            params.add(termoMaiusculo);
+        }
+        sql.append(" ORDER BY a.data_audiencia, a.horario_inicio");
+        return Database.query(sql.toString(), this::mapear, params.toArray());
+    }
+
+    /**
+     * Verifica se um parâmetro de filtro foi informado.
+     *
+     * @param valor valor do parâmetro
+     * @return {@code true} se não for nulo nem vazio
+     */
+    private static boolean naoVazio(String valor) {
+        return valor != null && !valor.isBlank();
     }
 
     /**
@@ -100,6 +163,17 @@ public class AudienciaService {
     public List<Map<String, Object>> listarPorData(LocalDate data) {
         return Database.query(SELECT_BASE + " WHERE a.data_audiencia = ? ORDER BY a.horario_inicio",
                 this::mapear, data.toString());
+    }
+
+    /**
+     * Lista as audiências de uma pauta, ordenadas pelo horário.
+     *
+     * @param pautaId id da pauta
+     * @return audiências da pauta
+     */
+    public List<Map<String, Object>> listarPorPauta(long pautaId) {
+        return Database.query(SELECT_BASE + " WHERE a.pauta_id = ? ORDER BY a.horario_inicio",
+                this::mapear, pautaId);
     }
 
     /**
@@ -124,17 +198,61 @@ public class AudienciaService {
         Valores v = validar(dados);
         String agora = LocalDateTime.now().toString();
         long id = Database.insert("""
-                        INSERT INTO audiencia (numero_processo, vara_id, data_audiencia, horario_inicio, duracao,
-                            horario_fim, dia_semana, tipo_audiencia, formato, competencia, status, artigo,
-                            observacoes, reu_preso, agendamento_teams, reconhecimento, depoimento_especial,
+                        INSERT INTO audiencia (numero_processo, pauta_id, vara_id, data_audiencia, horario_inicio,
+                            duracao, horario_fim, dia_semana, tipo_audiencia, formato, competencia, status, artigo,
+                            observacoes, defesa_previa, defesa_previa_folha, fa_cdc, fa_cdc_folha, laudo,
+                            laudo_folha, reu_preso, agendamento_teams, reconhecimento, depoimento_especial,
                             juiz_id, promotor_id, criacao, atualizacao)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                v.numeroProcesso, v.varaId, v.data.toString(), v.inicio.format(FORMATO_HORA), v.duracao,
+                v.numeroProcesso, v.pautaId, v.varaId, v.data.toString(), v.inicio.format(FORMATO_HORA), v.duracao,
                 v.fim.format(FORMATO_HORA), v.diaSemana, v.tipo, v.formato, v.competencia, v.status, v.artigo,
-                v.observacoes, v.reuPreso, v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
+                v.observacoes, v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
+                // reu_preso é derivado dos participantes presos; nasce desmarcado.
+                false, v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
                 v.juizId, v.promotorId, agora, agora);
         return buscarPorId(id);
+    }
+
+    /**
+     * Cria uma audiência dentro de uma pauta, herdando dela a data, a vara,
+     * o juiz e o promotor (vínculo rígido: os valores eventualmente enviados
+     * no corpo para esses campos são ignorados).
+     *
+     * @param pautaId id da pauta que receberá a audiência
+     * @param dados   demais campos da audiência (processo, horário, tipo etc.)
+     * @return audiência criada, no formato de resposta da API
+     * @throws ApiException 404 se a pauta não existir; 400 se a validação falhar
+     */
+    public Map<String, Object> criarNaPauta(long pautaId, Map<String, Object> dados) {
+        Map<String, Object> completos = new LinkedHashMap<>(dados == null ? Map.of() : dados);
+        injetarDadosDaPauta(pautaId, completos);
+        return criar(completos);
+    }
+
+    /**
+     * Copia para o corpo da audiência os campos herdados da pauta
+     * (data, vara, juiz, promotor) e o próprio {@code pautaId}.
+     *
+     * @param pautaId id da pauta
+     * @param dados   corpo da audiência a completar (modificado no lugar)
+     * @throws ApiException 404 se a pauta não existir
+     */
+    private void injetarDadosDaPauta(long pautaId, Map<String, Object> dados) {
+        Map<String, Object> pauta = Database.queryOne(
+                        "SELECT data, vara_id, juiz_id, promotor_id FROM pauta WHERE id = ?",
+                        rs -> Map.<String, Object>of(
+                                "data", rs.getString("data"),
+                                "varaId", rs.getLong("vara_id"),
+                                "juizId", rs.getLong("juiz_id"),
+                                "promotorId", rs.getLong("promotor_id")),
+                        pautaId)
+                .orElseThrow(() -> ApiException.naoEncontrado("Pauta não encontrada com id " + pautaId));
+        dados.put("pautaId", pautaId);
+        dados.put("dataAudiencia", pauta.get("data"));
+        dados.put("varaId", pauta.get("varaId"));
+        dados.put("juizId", pauta.get("juizId"));
+        dados.put("promotorId", pauta.get("promotorId"));
     }
 
     /**
@@ -146,19 +264,30 @@ public class AudienciaService {
      * @throws ApiException 404 se não existir; 400 se a validação falhar
      */
     public Map<String, Object> atualizar(long id, Map<String, Object> dados) {
-        buscarPorId(id);
-        Valores v = validar(dados);
+        Map<String, Object> existente = buscarPorId(id);
+        Map<String, Object> completos = new LinkedHashMap<>(dados == null ? Map.of() : dados);
+        // Audiência de pauta mantém o vínculo rígido: data, vara, juiz e
+        // promotor vêm sempre da pauta, mesmo que o corpo tente alterá-los.
+        Object pautaId = existente.get("pautaId");
+        if (pautaId != null) {
+            injetarDadosDaPauta(((Number) pautaId).longValue(), completos);
+        }
+        Valores v = validar(completos);
+        // reu_preso não entra no UPDATE: é derivado dos participantes presos
+        // e mantido pelo ParticipacaoService.
         Database.update("""
                         UPDATE audiencia SET numero_processo = ?, vara_id = ?, data_audiencia = ?, horario_inicio = ?,
                             duracao = ?, horario_fim = ?, dia_semana = ?, tipo_audiencia = ?, formato = ?,
-                            competencia = ?, status = ?, artigo = ?, observacoes = ?, reu_preso = ?,
+                            competencia = ?, status = ?, artigo = ?, observacoes = ?, defesa_previa = ?,
+                            defesa_previa_folha = ?, fa_cdc = ?, fa_cdc_folha = ?, laudo = ?, laudo_folha = ?,
                             agendamento_teams = ?, reconhecimento = ?, depoimento_especial = ?, juiz_id = ?,
                             promotor_id = ?, atualizacao = ?
                         WHERE id = ?
                         """,
                 v.numeroProcesso, v.varaId, v.data.toString(), v.inicio.format(FORMATO_HORA), v.duracao,
                 v.fim.format(FORMATO_HORA), v.diaSemana, v.tipo, v.formato, v.competencia, v.status, v.artigo,
-                v.observacoes, v.reuPreso, v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
+                v.observacoes, v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
+                v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
                 v.juizId, v.promotorId, LocalDateTime.now().toString(), id);
         return buscarPorId(id);
     }
@@ -192,7 +321,7 @@ public class AudienciaService {
         LocalTime inicio = LocalTime.parse(horarioInicio);
         LocalTime fim = inicio.plusMinutes(duracao);
 
-        String sql = SELECT_BASE + " WHERE a.data_audiencia = ? AND a.vara_id = ? AND a.status != 'CANCELADA'";
+        String sql = SELECT_BASE + " WHERE a.data_audiencia = ? AND a.vara_id = ? AND a.status != 'NAO_REALIZADA'";
         List<Object> params = new ArrayList<>(List.of(data.toString(), varaId));
         if (audienciaId != null) {
             sql += " AND a.id != ?";
@@ -203,7 +332,9 @@ public class AudienciaService {
         for (Map<String, Object> audiencia : Database.query(sql, this::mapear, params.toArray())) {
             LocalTime inicioExistente = LocalTime.parse((String) audiencia.get("horarioInicio"));
             LocalTime fimExistente = inicioExistente.plusMinutes(((Number) audiencia.get("duracao")).longValue());
-            boolean sobrepoe = !(fim.isBefore(inicioExistente) || inicio.isAfter(fimExistente));
+            // Sobreposição real de intervalos: audiências encostadas (uma termina
+            // exatamente quando a outra começa) não são conflito.
+            boolean sobrepoe = inicio.isBefore(fimExistente) && fim.isAfter(inicioExistente);
             if (sobrepoe) {
                 Map<String, Object> conflito = new LinkedHashMap<>();
                 conflito.put("id", audiencia.get("id"));
@@ -238,15 +369,19 @@ public class AudienciaService {
         LocalTime minimo = LocalTime.parse(horarioMinimo);
         LocalTime maximo = LocalTime.parse(horarioMaximo);
         int intervaloSeguranca = 30;
+        LocalDate hoje = LocalDate.now();
+        LocalTime agora = LocalTime.now();
 
         List<Map<String, Object>> livres = new ArrayList<>();
         for (LocalDate dia = dataInicio; !dia.isAfter(dataFim); dia = dia.plusDays(1)) {
-            if (dia.getDayOfWeek() == DayOfWeek.SATURDAY || dia.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            if (dia.getDayOfWeek() == DayOfWeek.SATURDAY || dia.getDayOfWeek() == DayOfWeek.SUNDAY
+                    || dia.isBefore(hoje)) {
+                // Fins de semana e dias já passados não recebem sugestões.
                 continue;
             }
             List<LocalTime[]> ocupados = Database.query(
                     "SELECT horario_inicio, duracao FROM audiencia " +
-                            "WHERE data_audiencia = ? AND vara_id = ? AND status != 'CANCELADA'",
+                            "WHERE data_audiencia = ? AND vara_id = ? AND status != 'NAO_REALIZADA'",
                     rs -> {
                         LocalTime ini = LocalTime.parse(rs.getString("horario_inicio"));
                         return new LocalTime[]{ini, ini.plusMinutes(rs.getInt("duracao"))};
@@ -254,11 +389,17 @@ public class AudienciaService {
                     dia.toString(), varaId);
 
             for (LocalTime slot = minimo; !slot.plusMinutes(duracao).isAfter(maximo); slot = slot.plusMinutes(30)) {
+                if (dia.equals(hoje) && slot.isBefore(agora)) {
+                    // Não sugerir horários que já passaram no dia de hoje.
+                    continue;
+                }
                 LocalTime fimSlot = slot.plusMinutes(duracao);
                 boolean conflita = false;
                 for (LocalTime[] ocupado : ocupados) {
-                    if (!(fimSlot.plusMinutes(intervaloSeguranca).isBefore(ocupado[0])
-                            || slot.isAfter(ocupado[1].plusMinutes(intervaloSeguranca)))) {
+                    // O slot é válido quando termina 30 min (intervalo de segurança)
+                    // antes da audiência ocupada OU começa 30 min depois dela.
+                    if (fimSlot.plusMinutes(intervaloSeguranca).isAfter(ocupado[0])
+                            && slot.isBefore(ocupado[1].plusMinutes(intervaloSeguranca))) {
                         conflita = true;
                         break;
                     }
@@ -320,10 +461,21 @@ public class AudienciaService {
         a.put("status", rs.getString("status"));
         a.put("artigo", rs.getString("artigo"));
         a.put("observacoes", rs.getString("observacoes"));
+        a.put("defesaPrevia", rs.getInt("defesa_previa") != 0);
+        a.put("defesaPreviaFolha", rs.getString("defesa_previa_folha"));
+        a.put("faCdc", rs.getInt("fa_cdc") != 0);
+        a.put("faCdcFolha", rs.getString("fa_cdc_folha"));
+        a.put("laudo", rs.getInt("laudo") != 0);
+        a.put("laudoFolha", rs.getString("laudo_folha"));
         a.put("reuPreso", rs.getInt("reu_preso") != 0);
         a.put("agendamentoTeams", rs.getInt("agendamento_teams") != 0);
         a.put("reconhecimento", rs.getInt("reconhecimento") != 0);
         a.put("depoimentoEspecial", rs.getInt("depoimento_especial") != 0);
+
+        long pautaId = rs.getLong("pauta_id");
+        if (!rs.wasNull()) {
+            a.put("pautaId", pautaId);
+        }
 
         long varaId = rs.getLong("vara_id");
         a.put("varaId", varaId);
@@ -348,6 +500,7 @@ public class AudienciaService {
      */
     private static final class Valores {
         String numeroProcesso;
+        Long pautaId;
         long varaId;
         Long juizId;
         Long promotorId;
@@ -362,7 +515,12 @@ public class AudienciaService {
         String status;
         String artigo;
         String observacoes;
-        boolean reuPreso;
+        boolean defesaPrevia;
+        String defesaPreviaFolha;
+        boolean faCdc;
+        String faCdcFolha;
+        boolean laudo;
+        String laudoFolha;
         boolean agendamentoTeams;
         boolean reconhecimento;
         boolean depoimentoEspecial;
@@ -383,8 +541,13 @@ public class AudienciaService {
         v.numeroProcesso = texto(dados, "numeroProcesso");
         if (v.numeroProcesso == null) {
             erros.put("numeroProcesso", "Número do processo é obrigatório");
-        } else if (!PADRAO_PROCESSO.matcher(v.numeroProcesso).matches()) {
-            erros.put("numeroProcesso", "Número do processo deve seguir o padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO");
+        } else {
+            // Aceita o número com ou sem máscara: 20 dígitos são formatados no padrão CNJ.
+            v.numeroProcesso = Textos.formatarProcessoCnj(v.numeroProcesso);
+            if (!PADRAO_PROCESSO.matcher(v.numeroProcesso).matches()) {
+                erros.put("numeroProcesso",
+                        "Número do processo deve seguir o padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO (20 dígitos)");
+            }
         }
 
         String dataTexto = texto(dados, "dataAudiencia");
@@ -450,11 +613,18 @@ public class AudienciaService {
             throw ApiException.validacao(erros);
         }
 
+        v.pautaId = idOpcional(dados, "pautaId", erros);
         v.fim = v.inicio.plusMinutes(v.duracao);
         v.diaSemana = v.data.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
-        v.artigo = texto(dados, "artigo");
-        v.observacoes = texto(dados, "observacoes");
-        v.reuPreso = booleano(dados, "reuPreso");
+        v.artigo = Textos.maiusculas(texto(dados, "artigo"));
+        v.observacoes = Textos.maiusculas(texto(dados, "observacoes"));
+        // Peças do processo: a folha só é gravada quando a peça está marcada.
+        v.defesaPrevia = booleano(dados, "defesaPrevia");
+        v.defesaPreviaFolha = v.defesaPrevia ? Textos.maiusculas(texto(dados, "defesaPreviaFolha")) : null;
+        v.faCdc = booleano(dados, "faCdc");
+        v.faCdcFolha = v.faCdc ? Textos.maiusculas(texto(dados, "faCdcFolha")) : null;
+        v.laudo = booleano(dados, "laudo");
+        v.laudoFolha = v.laudo ? Textos.maiusculas(texto(dados, "laudoFolha")) : null;
         v.agendamentoTeams = booleano(dados, "agendamentoTeams");
         v.reconhecimento = booleano(dados, "reconhecimento");
         v.depoimentoEspecial = booleano(dados, "depoimentoEspecial");

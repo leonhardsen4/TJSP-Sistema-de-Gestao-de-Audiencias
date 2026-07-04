@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { ArrowLeft, Calendar, Clock, MapPin, User, FileText, AlertCircle, Users } from 'lucide-react';
+import { Calendar, Clock, MapPin, User, FileText, Users } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import api from '../../services/api';
+import { rotuloTipoParticipacao } from '../../utils/participacao';
 
 interface Audiencia {
   id: number;
+  pautaId?: number;
   numeroProcesso: string;
   dataAudiencia: string;
   horarioInicio: string;
@@ -40,8 +41,22 @@ interface Participante {
   };
   tipo: string;
   intimado: boolean;
+  statusMandado?: string;
+  folhaIntimacao?: string;
   observacoes?: string;
+  representacao?: {
+    tipo: string;
+    advogado: { id: number; nome: string; oab: string };
+  } | null;
 }
+
+/** Rótulo e cor da situação do mandado de intimação. */
+const statusMandadoInfo: Record<string, { rotulo: string; classe: string }> = {
+  PENDENTE: { rotulo: 'Mandado pendente', classe: 'bg-yellow-100 text-yellow-800' },
+  POSITIVO: { rotulo: 'Mandado positivo', classe: 'bg-green-100 text-green-800' },
+  NEGATIVO: { rotulo: 'Mandado negativo', classe: 'bg-red-100 text-red-800' },
+  DISPENSADO: { rotulo: 'Mandado dispensado', classe: 'bg-gray-100 text-gray-700' }
+};
 
 const AudienciasDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -102,47 +117,18 @@ const AudienciasDetail: React.FC = () => {
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
-      case 'DESIGNADA':
+      case 'PENDENTE':
         return 'bg-blue-100 text-blue-800';
       case 'REALIZADA':
         return 'bg-green-100 text-green-800';
-      case 'PARCIALMENTE_REALIZADA':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'CANCELADA':
+      case 'NAO_REALIZADA':
         return 'bg-red-100 text-red-800';
-      case 'REDESIGNADA':
-        return 'bg-purple-100 text-purple-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const getTipoParticipacaoLabel = (tipo: string) => {
-    switch (tipo) {
-      case 'REU':
-        return 'Réu';
-      case 'VITIMA':
-        return 'Vítima';
-      case 'VITIMA_FATAL':
-        return 'Vítima Fatal';
-      case 'REPRESENTANTE_LEGAL':
-        return 'Representante Legal';
-      case 'TESTEMUNHA_COMUM':
-        return 'Testemunha Comum';
-      case 'TESTEMUNHA_ACUSACAO':
-        return 'Testemunha de Acusação';
-      case 'TESTEMUNHA_DEFESA':
-        return 'Testemunha de Defesa';
-      case 'ASSISTENTE_ACUSACAO':
-        return 'Assistente de Acusação';
-      case 'PERITO':
-        return 'Perito';
-      case 'TERCEIRO':
-        return 'Terceiro';
-      default:
-        return tipo;
-    }
-  };
+  const getTipoParticipacaoLabel = rotuloTipoParticipacao;
 
   if (loading) {
     return (
@@ -175,6 +161,14 @@ const AudienciasDetail: React.FC = () => {
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Detalhes da Audiência</h1>
             <div className="flex space-x-2">
+              {audiencia.pautaId && (
+                <Link
+                  to={`/pautas/${audiencia.pautaId}`}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                >
+                  Abrir Pauta
+                </Link>
+              )}
               <Link
                 to={`/audiencias/editar/${audiencia.id}`}
                 className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
@@ -289,13 +283,28 @@ const AudienciasDetail: React.FC = () => {
                           <span className="font-medium">{participante.pessoa.nome}</span>
                           <div className="text-sm text-gray-600">
                             {getTipoParticipacaoLabel(participante.tipo)}
+                            {participante.representacao?.advogado && (
+                              <span> · Adv.: {participante.representacao.advogado.nome} (OAB {participante.representacao.advogado.oab})</span>
+                            )}
                           </div>
+                          {participante.folhaIntimacao && (
+                            <div className="text-xs text-gray-500">Intimação às {participante.folhaIntimacao}</div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        {participante.intimado && (
+                        {participante.intimado ? (
                           <Badge className="bg-green-100 text-green-800 text-xs">
                             Intimado
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-red-100 text-red-800 text-xs">
+                            Não intimado
+                          </Badge>
+                        )}
+                        {participante.statusMandado && statusMandadoInfo[participante.statusMandado] && (
+                          <Badge className={`${statusMandadoInfo[participante.statusMandado].classe} text-xs`}>
+                            {statusMandadoInfo[participante.statusMandado].rotulo}
                           </Badge>
                         )}
                         {participante.observacoes && (

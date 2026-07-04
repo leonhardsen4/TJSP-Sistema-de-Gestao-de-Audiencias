@@ -1,8 +1,12 @@
 import axios from 'axios';
 
-// Criar instância do axios com configuração personalizada
+// Criar instância do axios com configuração personalizada.
+// Em produção a API é servida pela mesma origem do frontend (Javalin),
+// então a baseURL fica vazia (URLs relativas) — funciona em qualquer
+// máquina da rede. Em desenvolvimento, .env.development aponta para
+// http://localhost:8080.
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8080',
+  baseURL: process.env.REACT_APP_API_URL ?? '',
   timeout: 10000,
 });
 

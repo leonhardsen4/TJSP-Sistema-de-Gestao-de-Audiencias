@@ -51,12 +51,6 @@ const PessoasDetail: React.FC = () => {
     }
   };
 
-  const formatarData = (data: string) => {
-    // Evita problemas de timezone ao tratar a data como local
-    const [year, month, day] = data.split('-');
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day)).toLocaleDateString('pt-BR');
-  };
-
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">

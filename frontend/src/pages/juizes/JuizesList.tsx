@@ -1,20 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import { Link } from 'react-router-dom';
-import PaginatedTable from '../../components/PaginatedTable';
+import DataTable from '../../components/DataTable';
+import { acoesPadrao } from '../../components/tableActions';
+
+/**
+ * Listagem de juízes com busca textual, ordenação, paginação e
+ * personalização de colunas (ocultar/reexibir e redimensionar).
+ */
 
 interface Juiz {
   id: number;
   nome: string;
-  email: string;
-  telefone: string;
+  email: string | null;
+  telefone: string | null;
 }
 
 const JuizesList: React.FC = () => {
   const [juizes, setJuizes] = useState<Juiz[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [filtro, setFiltro] = useState<string>('');
 
   useEffect(() => {
     const fetchJuizes = async () => {
@@ -34,27 +39,18 @@ const JuizesList: React.FC = () => {
     fetchJuizes();
   }, []);
 
-  const handleDelete = async (id: number, nome: string) => {
-    if (!window.confirm(`Tem certeza que deseja excluir o juiz "${nome}"?`)) {
+  const handleDelete = async (juiz: Juiz) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o juiz "${juiz.nome}"?`)) {
       return;
     }
-
     try {
-      await api.delete(`/juizes/${id}`);
-      setJuizes(juizes.filter(juiz => juiz.id !== id));
-    } catch (err) {
-      setError('Erro ao excluir juiz. Por favor, tente novamente.');
+      await api.delete(`/juizes/${juiz.id}`);
+      setJuizes(atual => atual.filter(j => j.id !== juiz.id));
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Erro ao excluir juiz. Por favor, tente novamente.');
       console.error('Erro ao excluir juiz:', err);
     }
   };
-
-  const juizesFiltrados = juizes.filter(juiz => {
-    const termoBusca = filtro.toLowerCase();
-    return (
-      (juiz.nome && juiz.nome.toLowerCase().includes(termoBusca)) ||
-      (juiz.email && juiz.email.toLowerCase().includes(termoBusca))
-    );
-  });
 
   if (loading) {
     return (
@@ -64,78 +60,37 @@ const JuizesList: React.FC = () => {
     );
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-        <strong className="font-bold">Erro!</strong>
-        <span className="block sm:inline"> {error}</span>
-      </div>
-    );
-  }
-
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Juízes</h1>
-        <Link 
-          to="/juizes/novo" 
+        <Link
+          to="/juizes/novo"
           className="bg-blue-900 hover:bg-blue-800 text-white font-bold py-2 px-4 rounded"
         >
           Novo Juiz
         </Link>
       </div>
 
-      <div className="mb-6">
-        <input
-          type="text"
-          placeholder="Buscar por nome ou email..."
-          className="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={filtro}
-          onChange={(e) => setFiltro(e.target.value)}
-        />
-      </div>
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+          <strong className="font-bold">Erro!</strong>
+          <span className="block sm:inline"> {error}</span>
+        </div>
+      )}
 
-      <PaginatedTable
-        data={juizesFiltrados}
+      <DataTable
+        data={juizes}
+        searchable
+        searchPlaceholder="Buscar por nome, e-mail ou telefone..."
+        storageKey="juizes"
         columns={[
-          { key: 'nome', label: 'Nome' },
-          { key: 'email', label: 'Email' },
-          { key: 'telefone', label: 'Telefone' }
+          { key: 'nome', label: 'Nome', sortable: true },
+          { key: 'email', label: 'E-mail', sortable: true, render: (v) => v || '—' },
+          { key: 'telefone', label: 'Telefone', sortable: true, render: (v) => v || '—' }
         ]}
-        actions={[
-          {
-            label: 'Detalhes',
-            href: '/juizes/:id',
-            className: 'bg-blue-100 text-blue-700 hover:bg-blue-200',
-            icon: (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-            )
-          },
-          {
-            label: 'Editar',
-            href: '/juizes/editar/:id',
-            className: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200',
-            icon: (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-            )
-          },
-          {
-            label: 'Excluir',
-            onClick: (juiz) => handleDelete(juiz.id, juiz.nome),
-            className: 'bg-red-100 text-red-700 hover:bg-red-200',
-            icon: (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            )
-          }
-        ]}
-        emptyMessage="Nenhum juiz encontrado."
+        actions={acoesPadrao('/juizes', handleDelete)}
+        emptyMessage="Nenhum juiz cadastrado. Clique em 'Novo Juiz' para começar."
       />
     </div>
   );

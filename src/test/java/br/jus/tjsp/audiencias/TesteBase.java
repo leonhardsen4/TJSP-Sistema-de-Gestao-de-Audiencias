@@ -47,6 +47,32 @@ public abstract class TesteBase {
     }
 
     /**
+     * Insere um promotor mínimo e devolve o id gerado.
+     *
+     * @param nome nome do promotor
+     * @return id do promotor criado
+     */
+    protected long criarPromotor(String nome) {
+        return Database.insert("INSERT INTO promotor (nome) VALUES (?)", nome);
+    }
+
+    /**
+     * Insere uma pauta mínima (com vara, juiz e promotor novos) e devolve
+     * o id gerado.
+     *
+     * @param data data da pauta no formato {@code yyyy-MM-dd}
+     * @return id da pauta criada
+     */
+    protected long criarPauta(String data) {
+        long varaId = criarVara("VARA DA PAUTA");
+        long juizId = criarJuiz("JUIZ DA PAUTA");
+        long promotorId = criarPromotor("PROMOTOR DA PAUTA");
+        return Database.insert(
+                "INSERT INTO pauta (data, vara_id, juiz_id, promotor_id) VALUES (?, ?, ?, ?)",
+                data, varaId, juizId, promotorId);
+    }
+
+    /**
      * Insere uma pessoa mínima e devolve o id gerado.
      *
      * @param nome nome da pessoa
@@ -80,7 +106,7 @@ public abstract class TesteBase {
                 "dataAudiencia", data,
                 "horarioInicio", hora,
                 "duracao", 60,
-                "status", "DESIGNADA",
+                "status", "PENDENTE",
                 "tipoAudiencia", "INSTRUCAO_DEBATES_JULGAMENTO",
                 "competencia", "CRIMINAL",
                 "formato", "PRESENCIAL",

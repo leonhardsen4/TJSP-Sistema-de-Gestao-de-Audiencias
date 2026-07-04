@@ -24,14 +24,15 @@ class CrudDaoTest extends TesteBase {
             List.of("nome", "comarca", "endereco", "telefone", "email", "observacoes"), List.of("nome"));
 
     /**
-     * Criar deve gerar id e devolver o registro completo.
+     * Criar deve gerar id e devolver o registro completo, com os textos
+     * normalizados em MAIÚSCULAS.
      */
     @Test
     void criarDeveGerarIdEDevolverRegistro() {
         Map<String, Object> criada = varas.criar(Map.of("nome", "1ª Vara", "comarca", "São Paulo"));
         assertEquals(1L, criada.get("id"));
-        assertEquals("1ª Vara", criada.get("nome"));
-        assertEquals("São Paulo", criada.get("comarca"));
+        assertEquals("1ª VARA", criada.get("nome"));
+        assertEquals("SÃO PAULO", criada.get("comarca"));
         assertNull(criada.get("telefone"));
     }
 
@@ -54,17 +55,18 @@ class CrudDaoTest extends TesteBase {
         varas.criar(Map.of("nome", "Vara A"));
         List<Map<String, Object>> lista = varas.listar();
         assertEquals(2, lista.size());
-        assertEquals("Vara A", lista.get(0).get("nome"));
+        assertEquals("VARA A", lista.get(0).get("nome"));
     }
 
     /**
-     * Atualizar deve substituir os valores e manter o id.
+     * Atualizar deve substituir os valores e manter o id. O nome vai para
+     * MAIÚSCULAS; o e-mail é preservado como digitado.
      */
     @Test
     void atualizarDeveSubstituirValores() {
         long id = (long) varas.criar(Map.of("nome", "Antiga")).get("id");
         Map<String, Object> atualizada = varas.atualizar(id, Map.of("nome", "Nova", "email", "n@tjsp.jus.br"));
-        assertEquals("Nova", atualizada.get("nome"));
+        assertEquals("NOVA", atualizada.get("nome"));
         assertEquals("n@tjsp.jus.br", atualizada.get("email"));
         assertEquals(id, atualizada.get("id"));
     }

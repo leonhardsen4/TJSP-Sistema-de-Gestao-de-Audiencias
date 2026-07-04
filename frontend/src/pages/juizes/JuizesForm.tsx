@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { maskTelefone, toUpper } from '../../utils/masks';
+
+/**
+ * Cadastro de juiz: somente o nome é obrigatório (telefone e e-mail são
+ * opcionais). O nome vai para MAIÚSCULAS ao digitar.
+ */
 
 interface JuizForm {
   nome: string;
@@ -26,11 +32,14 @@ const JuizesForm: React.FC = () => {
   useEffect(() => {
     const fetchJuiz = async () => {
       if (!isEdicao) return;
-      
       try {
         setLoading(true);
-        const response = await api.get(`/juizes/${id}`);
-        setFormData(response.data);
+        const j = (await api.get(`/juizes/${id}`)).data;
+        setFormData({
+          nome: j.nome || '',
+          email: j.email || '',
+          telefone: j.telefone || ''
+        });
         setError(null);
       } catch (err) {
         setError('Erro ao carregar dados do juiz. Por favor, tente novamente.');
@@ -43,27 +52,31 @@ const JuizesForm: React.FC = () => {
     fetchJuiz();
   }, [id, isEdicao]);
 
+  /** Aplica a máscara/transformação adequada a cada campo enquanto digita. */
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    let valor = value;
+    if (name === 'telefone') {
+      valor = maskTelefone(value);
+    } else if (name === 'nome') {
+      valor = toUpper(value);
+    }
+    setFormData(prev => ({ ...prev, [name]: valor }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       setSubmitting(true);
       setError(null);
-      
+
       if (isEdicao) {
         await api.put(`/juizes/${id}`, formData);
       } else {
         await api.post('/juizes', formData);
       }
-      
+
       navigate('/juizes');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao salvar juiz. Por favor, tente novamente.');
@@ -86,14 +99,14 @@ const JuizesForm: React.FC = () => {
       <h1 className="text-2xl font-bold text-gray-800 mb-6">
         {isEdicao ? 'Editar Juiz' : 'Novo Juiz'}
       </h1>
-      
+
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
           <strong className="font-bold">Erro!</strong>
           <span className="block sm:inline"> {error}</span>
         </div>
       )}
-      
+
       <form onSubmit={handleSubmit} className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="nome">
@@ -104,16 +117,17 @@ const JuizesForm: React.FC = () => {
             id="nome"
             name="nome"
             type="text"
-            placeholder="Nome completo"
+            placeholder="NOME COMPLETO"
+            maxLength={100}
             value={formData.nome}
             onChange={handleChange}
             required
           />
         </div>
-        
+
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="email">
-            Email
+            E-mail
           </label>
           <input
             className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -121,11 +135,12 @@ const JuizesForm: React.FC = () => {
             name="email"
             type="email"
             placeholder="email@exemplo.com"
+            maxLength={100}
             value={formData.email}
             onChange={handleChange}
           />
         </div>
-        
+
         <div className="mb-6">
           <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="telefone">
             Telefone
@@ -135,12 +150,14 @@ const JuizesForm: React.FC = () => {
             id="telefone"
             name="telefone"
             type="text"
+            inputMode="numeric"
             placeholder="(00) 00000-0000"
+            maxLength={15}
             value={formData.telefone}
             onChange={handleChange}
           />
         </div>
-        
+
         <div className="flex items-center justify-between">
           <button
             className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"

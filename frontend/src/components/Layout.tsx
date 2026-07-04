@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  CalendarIcon, 
-  UserGroupIcon, 
+import {
+  UserGroupIcon,
   ScaleIcon, 
   UserIcon, 
   BriefcaseIcon,
@@ -14,7 +13,9 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   BuildingOfficeIcon,
-  ClockIcon
+  ClockIcon,
+  ClipboardDocumentCheckIcon,
+  QueueListIcon
 } from '@heroicons/react/24/outline';
 
 const Layout: React.FC = () => {
@@ -29,8 +30,9 @@ const Layout: React.FC = () => {
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: HomeIcon },
+    { name: 'Pautas', href: '/pautas', icon: QueueListIcon },
     { name: 'Audiências', href: '/audiencias', icon: ClockIcon },
-    { name: 'Horários Livres', href: '/audiencias/horarios-livres', icon: CalendarIcon },
+    { name: 'Mandados', href: '/mandados', icon: ClipboardDocumentCheckIcon },
     { name: 'Varas', href: '/varas', icon: BuildingOfficeIcon },
     { name: 'Juízes', href: '/juizes', icon: ScaleIcon },
     { name: 'Promotores', href: '/promotores', icon: UserIcon },

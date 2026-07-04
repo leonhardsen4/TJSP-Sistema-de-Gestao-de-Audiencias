@@ -11,6 +11,19 @@ backend Java com **Javalin + SQLite** e frontend **React com TypeScript**.
 
 ## 🚀 Execução
 
+### Forma simples (um comando)
+
+```bash
+./iniciar.sh
+```
+
+Compila o frontend somente se algum fonte mudou e sobe o sistema completo em
+`http://localhost:8080` — o backend Javalin serve a interface e a API no mesmo
+endereço (funciona também acessando pelo IP da máquina na rede local).
+
+As seções abaixo são o modo de **desenvolvimento** (frontend com recarga
+automática na porta 3000), útil apenas quando se está alterando o código.
+
 ### Backend (porta 8080)
 
 ```bash

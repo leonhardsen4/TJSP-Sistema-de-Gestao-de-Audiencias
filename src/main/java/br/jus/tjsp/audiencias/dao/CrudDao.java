@@ -1,6 +1,7 @@
 package br.jus.tjsp.audiencias.dao;
 
 import br.jus.tjsp.audiencias.config.Database;
+import br.jus.tjsp.audiencias.util.Textos;
 import br.jus.tjsp.audiencias.web.ApiException;
 
 import java.sql.ResultSet;
@@ -170,13 +171,21 @@ public class CrudDao {
                 erros.put(campo, "Campo obrigatório");
             }
         }
+        if (colunas.contains("cpf") && dados != null) {
+            Object cpf = dados.get("cpf");
+            if (cpf != null && !cpf.toString().isBlank() && !Textos.cpfValido(cpf.toString())) {
+                erros.put("cpf", "CPF inválido: deve ter 11 dígitos numéricos com verificadores corretos");
+            }
+        }
         if (!erros.isEmpty()) {
             throw ApiException.validacao(erros);
         }
     }
 
     /**
-     * Extrai os valores das colunas editáveis na ordem esperada pelos SQLs.
+     * Extrai os valores das colunas editáveis na ordem esperada pelos SQLs,
+     * já normalizados: textos livres em MAIÚSCULAS, CPF e telefone com a
+     * máscara padrão e e-mail como digitado.
      *
      * @param dados mapa recebido da API
      * @return vetor de valores alinhado com {@code colunas}
@@ -185,7 +194,15 @@ public class CrudDao {
         return colunas.stream()
                 .map(c -> {
                     Object v = dados.get(c);
-                    return v == null ? null : v.toString();
+                    if (v == null || v.toString().isBlank()) {
+                        return null;
+                    }
+                    return switch (c) {
+                        case "email" -> v.toString().strip();
+                        case "cpf" -> Textos.formatarCpf(v.toString());
+                        case "telefone" -> Textos.formatarTelefone(v.toString());
+                        default -> Textos.maiusculas(v.toString());
+                    };
                 })
                 .toArray();
     }

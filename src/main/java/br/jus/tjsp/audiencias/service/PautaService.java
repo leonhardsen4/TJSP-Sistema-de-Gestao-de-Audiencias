@@ -1,273 +1,266 @@
 package br.jus.tjsp.audiencias.service;
 
-import com.lowagie.text.Chunk;
-import com.lowagie.text.Document;
-import com.lowagie.text.Element;
-import com.lowagie.text.Font;
-import com.lowagie.text.PageSize;
-import com.lowagie.text.Paragraph;
-import com.lowagie.text.Rectangle;
-import com.lowagie.text.pdf.PdfPCell;
-import com.lowagie.text.pdf.PdfPTable;
-import com.lowagie.text.pdf.PdfWriter;
+import br.jus.tjsp.audiencias.config.Database;
+import br.jus.tjsp.audiencias.util.Textos;
+import br.jus.tjsp.audiencias.web.ApiException;
 
-import java.awt.Color;
-import java.io.ByteArrayOutputStream;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.time.LocalDateTime;
+import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * Gera o PDF da pauta de audiências de um dia, usando OpenPDF.
+ * Regras de negócio das pautas de audiências.
  *
- * <p>Cada audiência é apresentada em um bloco com número do processo,
- * horário, competência, tipo, formato, vara, juiz, promotor, observações
- * e a lista de participantes com seus advogados.</p>
+ * <p>A pauta representa o dia de trabalho de uma vara: reúne as audiências
+ * de uma data, com um mesmo juiz e um mesmo promotor — como se trabalha no
+ * fórum. O vínculo é rígido: toda audiência pertence a exatamente uma
+ * pauta e herda dela a data, a vara, o juiz e o promotor (exceções são
+ * anotadas no campo de observações da pauta). Alterações no cabeçalho da
+ * pauta são propagadas automaticamente às suas audiências.</p>
  */
 public class PautaService {
 
-    /** Datas exibidas no PDF sempre em formato brasileiro. */
-    private static final DateTimeFormatter FORMATO_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    /** Locale brasileiro para o nome do dia da semana. */
+    private static final Locale PT_BR = Locale.forLanguageTag("pt-BR");
 
-    /** Serviço usado para listar as audiências do dia. */
-    private final AudienciaService audienciaService;
-
-    /** Serviço usado para listar os participantes de cada audiência. */
-    private final ParticipacaoService participacaoService;
+    /** Consulta base com os nomes de vara/juiz/promotor e o total de audiências. */
+    private static final String SELECT_BASE = """
+            SELECT p.*, v.nome AS vara_nome, v.cor AS vara_cor,
+                   j.nome AS juiz_nome, pr.nome AS promotor_nome,
+                   (SELECT COUNT(*) FROM audiencia a WHERE a.pauta_id = p.id) AS total_audiencias
+            FROM pauta p
+            JOIN vara v ON v.id = p.vara_id
+            JOIN juiz j ON j.id = p.juiz_id
+            JOIN promotor pr ON pr.id = p.promotor_id
+            """;
 
     /**
-     * Cria o serviço de pauta.
+     * Lista as pautas aplicando os filtros informados (todos opcionais).
      *
-     * @param audienciaService    fonte das audiências do dia
-     * @param participacaoService fonte dos participantes de cada audiência
+     * @param dataInicio primeira data do período ({@code yyyy-MM-dd} ou {@code dd/MM/yyyy})
+     * @param dataFim    última data do período
+     * @param varaId     vara da pauta
+     * @param texto      trecho do nome da vara, do juiz, do promotor ou das observações
+     * @return pautas ordenadas por data e vara
      */
-    public PautaService(AudienciaService audienciaService, ParticipacaoService participacaoService) {
-        this.audienciaService = audienciaService;
-        this.participacaoService = participacaoService;
+    public List<Map<String, Object>> listar(String dataInicio, String dataFim, String varaId, String texto) {
+        StringBuilder sql = new StringBuilder(SELECT_BASE).append(" WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+
+        if (naoVazio(dataInicio)) {
+            sql.append(" AND p.data >= ?");
+            params.add(AudienciaService.parseData(dataInicio).toString());
+        }
+        if (naoVazio(dataFim)) {
+            sql.append(" AND p.data <= ?");
+            params.add(AudienciaService.parseData(dataFim).toString());
+        }
+        if (naoVazio(varaId)) {
+            sql.append(" AND p.vara_id = ?");
+            params.add(Long.parseLong(varaId));
+        }
+        if (naoVazio(texto)) {
+            // O UPPER() do SQLite só cobre ASCII; a conversão do termo é
+            // feita no Java para que acentos também casem (ex.: "mutirão").
+            sql.append(" AND (UPPER(v.nome) LIKE ? OR UPPER(j.nome) LIKE ?"
+                    + " OR UPPER(pr.nome) LIKE ? OR UPPER(COALESCE(p.observacoes, '')) LIKE ?)");
+            String termo = "%" + Textos.maiusculas(texto) + "%";
+            params.add(termo);
+            params.add(termo);
+            params.add(termo);
+            params.add(termo);
+        }
+        sql.append(" ORDER BY p.data, v.nome");
+        return Database.query(sql.toString(), this::mapear, params.toArray());
     }
 
     /**
-     * Gera o PDF da pauta do dia.
+     * Busca uma pauta pelo id.
      *
-     * @param data data da pauta
-     * @return bytes do documento PDF
+     * @param id identificador da pauta
+     * @return pauta com vara/juiz/promotor aninhados e total de audiências
+     * @throws ApiException 404 se não existir
      */
-    public byte[] gerarPautaPdf(LocalDate data) {
-        List<Map<String, Object>> audiencias = audienciaService.listarPorData(data);
+    public Map<String, Object> buscarPorId(long id) {
+        return Database.queryOne(SELECT_BASE + " WHERE p.id = ?", this::mapear, id)
+                .orElseThrow(() -> ApiException.naoEncontrado("Pauta não encontrada com id " + id));
+    }
 
-        ByteArrayOutputStream saida = new ByteArrayOutputStream();
-        Document documento = new Document(PageSize.A4);
-        PdfWriter.getInstance(documento, saida);
-        documento.open();
+    /**
+     * Cria uma pauta.
+     *
+     * @param dados corpo com {@code data}, {@code varaId}, {@code juizId},
+     *              {@code promotorId} e {@code observacoes} (opcional)
+     * @return pauta criada, no formato de resposta da API
+     * @throws ApiException 400 se a validação falhar
+     */
+    public Map<String, Object> criar(Map<String, Object> dados) {
+        Valores v = validar(dados);
+        String agora = LocalDateTime.now().toString();
+        long id = Database.insert("""
+                        INSERT INTO pauta (data, vara_id, juiz_id, promotor_id, observacoes, criacao, atualizacao)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                v.data.toString(), v.varaId, v.juizId, v.promotorId, v.observacoes, agora, agora);
+        return buscarPorId(id);
+    }
 
-        Font fonteTitulo = new Font(Font.HELVETICA, 18, Font.BOLD);
-        Paragraph titulo = new Paragraph("TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO", fonteTitulo);
-        titulo.setAlignment(Element.ALIGN_CENTER);
-        documento.add(titulo);
+    /**
+     * Atualiza o cabeçalho da pauta e propaga data, vara, juiz e promotor
+     * para todas as audiências vinculadas (vínculo rígido).
+     *
+     * @param id    identificador da pauta
+     * @param dados novos valores
+     * @return pauta atualizada
+     * @throws ApiException 404 se não existir; 400 se a validação falhar
+     */
+    public Map<String, Object> atualizar(long id, Map<String, Object> dados) {
+        buscarPorId(id);
+        Valores v = validar(dados);
+        Database.update("""
+                        UPDATE pauta SET data = ?, vara_id = ?, juiz_id = ?, promotor_id = ?,
+                            observacoes = ?, atualizacao = ?
+                        WHERE id = ?
+                        """,
+                v.data.toString(), v.varaId, v.juizId, v.promotorId, v.observacoes,
+                LocalDateTime.now().toString(), id);
 
-        Font fonteSubtitulo = new Font(Font.HELVETICA, 14, Font.BOLD);
-        Paragraph subtitulo = new Paragraph("PAUTA DE AUDIÊNCIAS", fonteSubtitulo);
-        subtitulo.setAlignment(Element.ALIGN_CENTER);
-        subtitulo.setSpacingBefore(10);
-        documento.add(subtitulo);
+        // Propagação rígida: as audiências da pauta acompanham o cabeçalho.
+        String diaSemana = v.data.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
+        Database.update("""
+                        UPDATE audiencia SET data_audiencia = ?, dia_semana = ?, vara_id = ?,
+                            juiz_id = ?, promotor_id = ?, atualizacao = ?
+                        WHERE pauta_id = ?
+                        """,
+                v.data.toString(), diaSemana, v.varaId, v.juizId, v.promotorId,
+                LocalDateTime.now().toString(), id);
+        return buscarPorId(id);
+    }
 
-        Font fonteData = new Font(Font.HELVETICA, 12, Font.NORMAL);
-        Paragraph paragrafoData = new Paragraph("Data: " + data.format(FORMATO_BR), fonteData);
-        paragrafoData.setAlignment(Element.ALIGN_CENTER);
-        paragrafoData.setSpacingBefore(10);
-        paragrafoData.setSpacingAfter(20);
-        documento.add(paragrafoData);
+    /**
+     * Exclui uma pauta e, por cascata, todas as suas audiências (com
+     * participações e representações).
+     *
+     * @param id identificador da pauta
+     * @throws ApiException 404 se não existir
+     */
+    public void excluir(long id) {
+        buscarPorId(id);
+        Database.update("DELETE FROM pauta WHERE id = ?", id);
+    }
 
-        if (audiencias.isEmpty()) {
-            Paragraph vazio = new Paragraph("Nenhuma audiência agendada para esta data.", fonteData);
-            vazio.setAlignment(Element.ALIGN_CENTER);
-            vazio.setSpacingBefore(50);
-            documento.add(vazio);
+    /**
+     * Converte uma linha do banco no formato JSON da API.
+     *
+     * @param rs result set posicionado na linha
+     * @return pauta como mapa pronto para serialização
+     * @throws SQLException se a leitura falhar
+     */
+    private Map<String, Object> mapear(ResultSet rs) throws SQLException {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("id", rs.getLong("id"));
+        p.put("data", rs.getString("data"));
+        p.put("observacoes", rs.getString("observacoes"));
+        p.put("totalAudiencias", rs.getInt("total_audiencias"));
+        Map<String, Object> vara = new LinkedHashMap<>();
+        vara.put("id", rs.getLong("vara_id"));
+        vara.put("nome", rs.getString("vara_nome"));
+        vara.put("cor", rs.getString("vara_cor"));
+        p.put("vara", vara);
+        p.put("juiz", Map.of("id", rs.getLong("juiz_id"), "nome", rs.getString("juiz_nome")));
+        p.put("promotor", Map.of("id", rs.getLong("promotor_id"), "nome", rs.getString("promotor_nome")));
+        return p;
+    }
+
+    /** Valores já validados de uma pauta, prontos para persistência. */
+    private static final class Valores {
+        LocalDate data;
+        long varaId;
+        long juizId;
+        long promotorId;
+        String observacoes;
+    }
+
+    /**
+     * Valida os campos da pauta: data, vara, juiz e promotor obrigatórios
+     * e existentes; observações normalizadas em maiúsculas.
+     *
+     * @param dados corpo da requisição
+     * @return valores convertidos e prontos para gravação
+     * @throws ApiException 400 com o mapa de erros por campo
+     */
+    private Valores validar(Map<String, Object> dados) {
+        Map<String, String> erros = new LinkedHashMap<>();
+        Valores v = new Valores();
+
+        Object dataTexto = dados == null ? null : dados.get("data");
+        if (dataTexto == null || dataTexto.toString().isBlank()) {
+            erros.put("data", "Data da pauta é obrigatória");
         } else {
-            for (int i = 0; i < audiencias.size(); i++) {
-                adicionarBlocoProcesso(documento, audiencias.get(i));
-                if (i < audiencias.size() - 1) {
-                    documento.add(new Paragraph(" ", new Font(Font.HELVETICA, 8, Font.NORMAL)));
-                }
+            try {
+                v.data = AudienciaService.parseData(dataTexto.toString());
+            } catch (ApiException e) {
+                erros.put("data", "Data inválida: " + dataTexto);
             }
         }
 
-        documento.close();
-        return saida.toByteArray();
+        v.varaId = exigirReferencia(dados, "varaId", "vara", "Vara", erros);
+        v.juizId = exigirReferencia(dados, "juizId", "juiz", "Juiz", erros);
+        v.promotorId = exigirReferencia(dados, "promotorId", "promotor", "Promotor", erros);
+
+        if (!erros.isEmpty()) {
+            throw ApiException.validacao(erros);
+        }
+
+        Object observacoes = dados.get("observacoes");
+        v.observacoes = observacoes == null ? null : Textos.maiusculas(observacoes.toString());
+        return v;
     }
 
     /**
-     * Adiciona ao documento o bloco de uma audiência, com moldura e
-     * fundo suave, contendo os dados do processo e os participantes.
+     * Lê um id obrigatório e confere se o registro existe na tabela.
      *
-     * @param documento documento em construção
-     * @param audiencia audiência no formato de resposta da API
+     * @param dados  corpo da requisição
+     * @param campo  nome do campo no JSON (ex.: {@code varaId})
+     * @param tabela tabela do banco (ex.: {@code vara})
+     * @param rotulo nome exibido na mensagem de erro
+     * @param erros  mapa de erros a alimentar
+     * @return id lido, ou {@code 0} se inválido (o erro já terá sido registrado)
      */
-    private void adicionarBlocoProcesso(Document documento, Map<String, Object> audiencia) {
-        PdfPTable tabela = new PdfPTable(1);
-        tabela.setWidthPercentage(100);
-        tabela.setSpacingBefore(10);
-        tabela.setSpacingAfter(5);
-
-        PdfPCell celula = new PdfPCell();
-        celula.setBorder(Rectangle.BOX);
-        celula.setPadding(10);
-        celula.setBackgroundColor(new Color(248, 249, 250));
-
-        Font fonteCabecalho = new Font(Font.HELVETICA, 14, Font.BOLD);
-        Font fonteHorario = new Font(Font.HELVETICA, 12, Font.BOLD);
-        Font fonteRotulo = new Font(Font.HELVETICA, 10, Font.BOLD);
-        Font fonteValor = new Font(Font.HELVETICA, 10, Font.NORMAL);
-
-        Paragraph cabecalho = new Paragraph();
-        cabecalho.add(new Chunk("PROCESSO Nº " + valor(audiencia, "numeroProcesso"), fonteCabecalho));
-        cabecalho.add(new Chunk("     HORÁRIO: " + valor(audiencia, "horarioInicio"), fonteHorario));
-        cabecalho.setSpacingAfter(8);
-        celula.addElement(cabecalho);
-
-        Paragraph competencia = new Paragraph();
-        competencia.add(new Chunk("COMPETÊNCIA: ", fonteRotulo));
-        competencia.add(new Chunk(valor(audiencia, "competencia"), fonteValor));
-        competencia.setSpacingAfter(5);
-        celula.addElement(competencia);
-
-        Paragraph info = new Paragraph();
-        info.add(new Chunk("Tipo: ", fonteRotulo));
-        info.add(new Chunk(valor(audiencia, "tipoAudiencia"), fonteValor));
-        info.add(new Chunk("     Formato: ", fonteRotulo));
-        info.add(new Chunk(valor(audiencia, "formato"), fonteValor));
-        info.setSpacingAfter(5);
-        celula.addElement(info);
-
-        Paragraph varaJuiz = new Paragraph();
-        varaJuiz.add(new Chunk("Vara: ", fonteRotulo));
-        varaJuiz.add(new Chunk(nomeAninhado(audiencia, "vara"), fonteValor));
-        varaJuiz.add(new Chunk("     Juiz: ", fonteRotulo));
-        varaJuiz.add(new Chunk(nomeAninhado(audiencia, "juiz"), fonteValor));
-        varaJuiz.setSpacingAfter(5);
-        celula.addElement(varaJuiz);
-
-        Paragraph promotor = new Paragraph();
-        promotor.add(new Chunk("Promotor: ", fonteRotulo));
-        promotor.add(new Chunk(nomeAninhado(audiencia, "promotor"), fonteValor));
-        promotor.setSpacingAfter(5);
-        celula.addElement(promotor);
-
-        Object observacoes = audiencia.get("observacoes");
-        if (observacoes != null && !observacoes.toString().isBlank()) {
-            Paragraph obs = new Paragraph();
-            obs.add(new Chunk("Observações: ", fonteRotulo));
-            obs.add(new Chunk(observacoes.toString(), fonteValor));
-            obs.setSpacingAfter(8);
-            celula.addElement(obs);
+    private static long exigirReferencia(Map<String, Object> dados, String campo, String tabela,
+                                         String rotulo, Map<String, String> erros) {
+        Object valor = dados == null ? null : dados.get(campo);
+        if (valor == null || valor.toString().isBlank() || "0".equals(valor.toString())) {
+            erros.put(campo, rotulo + " é obrigatório(a)");
+            return 0;
         }
-
-        Paragraph tituloParticipantes = new Paragraph();
-        tituloParticipantes.add(new Chunk("PARTICIPANTES:", fonteRotulo));
-        tituloParticipantes.setSpacingAfter(3);
-        celula.addElement(tituloParticipantes);
-
-        List<Map<String, Object>> participantes =
-                participacaoService.listar(((Number) audiencia.get("id")).longValue());
-        if (participantes.isEmpty()) {
-            Paragraph nenhum = new Paragraph("Nenhum participante cadastrado.", fonteValor);
-            nenhum.setIndentationLeft(10);
-            celula.addElement(nenhum);
-        } else {
-            for (Map<String, Object> participante : participantes) {
-                celula.addElement(linhaParticipante(participante, fonteValor));
+        try {
+            long id = Long.parseLong(valor.toString());
+            if (Database.count("SELECT COUNT(*) FROM " + tabela + " WHERE id = ?", id) == 0) {
+                erros.put(campo, rotulo + " não encontrado(a) com id " + id);
+                return 0;
             }
+            return id;
+        } catch (NumberFormatException e) {
+            erros.put(campo, "Valor inválido");
+            return 0;
         }
-
-        tabela.addCell(celula);
-        documento.add(tabela);
     }
 
     /**
-     * Monta a linha de um participante: nome, papel na audiência,
-     * advogado (se houver) e indicação de intimação.
+     * Verifica se um parâmetro de filtro foi informado.
      *
-     * @param participante participante no formato da API
-     * @param fonteValor   fonte base do texto
-     * @return parágrafo pronto para inclusão no bloco do processo
+     * @param valor valor do parâmetro
+     * @return {@code true} se não for nulo nem vazio
      */
-    private Paragraph linhaParticipante(Map<String, Object> participante, Font fonteValor) {
-        Paragraph linha = new Paragraph();
-        linha.setIndentationLeft(10);
-        linha.add(new Chunk("• ", fonteValor));
-        linha.add(new Chunk(nomeAninhado(participante, "pessoa"), fonteValor));
-        linha.add(new Chunk(" - ", fonteValor));
-        linha.add(new Chunk(descricaoTipoParticipacao(String.valueOf(participante.get("tipo"))),
-                new Font(Font.HELVETICA, 9, Font.ITALIC)));
-
-        Object representacao = participante.get("representacao");
-        if (representacao instanceof Map<?, ?> repr) {
-            Object advogado = repr.get("advogado");
-            if (advogado instanceof Map<?, ?> adv) {
-                linha.add(new Chunk(" | Advogado: ", new Font(Font.HELVETICA, 8, Font.BOLD)));
-                linha.add(new Chunk(String.valueOf(adv.get("nome")), new Font(Font.HELVETICA, 8, Font.NORMAL)));
-                linha.add(new Chunk(" (OAB: " + adv.get("oab") + ")",
-                        new Font(Font.HELVETICA, 8, Font.NORMAL, Color.BLUE)));
-            }
-        }
-        if (Boolean.TRUE.equals(participante.get("intimado"))) {
-            linha.add(new Chunk(" (Intimado)", new Font(Font.HELVETICA, 8, Font.BOLD, Color.GREEN)));
-        }
-        linha.setSpacingAfter(2);
-        return linha;
-    }
-
-    /**
-     * Lê um campo textual da audiência com {@code N/A} como padrão.
-     *
-     * @param mapa  audiência ou participante
-     * @param campo nome do campo
-     * @return valor do campo, ou {@code N/A} se ausente
-     */
-    private static String valor(Map<String, Object> mapa, String campo) {
-        Object v = mapa.get(campo);
-        return v == null ? "N/A" : v.toString();
-    }
-
-    /**
-     * Lê o nome de um objeto aninhado ({@code vara}, {@code juiz},
-     * {@code promotor} ou {@code pessoa}).
-     *
-     * @param mapa  mapa que contém o objeto aninhado
-     * @param campo nome do objeto aninhado
-     * @return nome encontrado, ou {@code N/A}
-     */
-    private static String nomeAninhado(Map<String, Object> mapa, String campo) {
-        Object aninhado = mapa.get(campo);
-        if (aninhado instanceof Map<?, ?> m && m.get("nome") != null) {
-            return m.get("nome").toString();
-        }
-        return "N/A";
-    }
-
-    /**
-     * Traduz o código do tipo de participação para a descrição exibida
-     * no PDF.
-     *
-     * @param tipo nome do enum {@code TipoParticipacao}
-     * @return descrição em português
-     */
-    private static String descricaoTipoParticipacao(String tipo) {
-        return switch (tipo) {
-            case "AUTOR" -> "Autor";
-            case "REU" -> "Réu";
-            case "VITIMA" -> "Vítima";
-            case "VITIMA_FATAL" -> "Vítima Fatal";
-            case "REPRESENTANTE_LEGAL" -> "Representante Legal";
-            case "TESTEMUNHA_COMUM" -> "Testemunha Comum";
-            case "TESTEMUNHA_ACUSACAO" -> "Testemunha de Acusação";
-            case "TESTEMUNHA_DEFESA" -> "Testemunha de Defesa";
-            case "ASSISTENTE_ACUSACAO" -> "Assistente de Acusação";
-            case "PERITO" -> "Perito";
-            case "TERCEIRO" -> "Terceiro";
-            case "OUTROS" -> "Outros";
-            default -> tipo;
-        };
+    private static boolean naoVazio(String valor) {
+        return valor != null && !valor.isBlank();
     }
 }

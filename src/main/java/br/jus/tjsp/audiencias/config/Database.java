@@ -77,8 +77,89 @@ public final class Database {
             dataSource = ds;
 
             executarSchema();
+            executarMigracoes();
         } catch (IOException | SQLException e) {
             throw new IllegalStateException("Falha ao inicializar o banco de dados: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Aplica alterações de esquema em bancos criados por versões anteriores.
+     * O {@code schema.sql} só cria tabelas novas (CREATE TABLE IF NOT EXISTS),
+     * então colunas acrescentadas depois precisam de ALTER TABLE aqui.
+     *
+     * @throws SQLException se algum comando falhar
+     */
+    private static void executarMigracoes() throws SQLException {
+        garantirColuna("participacao_audiencia", "status_mandado", "TEXT NOT NULL DEFAULT 'PENDENTE'");
+        garantirColuna("participacao_audiencia", "folha_intimacao", "TEXT");
+
+        // Introdução das pautas (jul/2026): audiências passam a pertencer a uma
+        // pauta. Na primeira execução após a mudança (coluna pauta_id ainda
+        // ausente), as audiências antigas — dados de teste sem pauta — são
+        // removidas, conforme decidido pelo usuário em 03/07/2026.
+        if (!colunaExiste("audiencia", "pauta_id")) {
+            garantirColuna("audiencia", "pauta_id", "INTEGER REFERENCES pauta (id) ON DELETE CASCADE");
+            try (Connection conn = getConnection(); Statement st = conn.createStatement()) {
+                st.execute("DELETE FROM audiencia");
+            }
+        }
+        // O índice fica fora do schema.sql porque em bancos antigos a coluna
+        // só existe depois da migração acima.
+        try (Connection conn = getConnection(); Statement st = conn.createStatement()) {
+            st.execute("CREATE INDEX IF NOT EXISTS idx_audiencia_pauta ON audiencia (pauta_id)");
+        }
+
+        // Cor de exibição das pautas da vara no calendário (jul/2026).
+        garantirColuna("vara", "cor", "TEXT");
+
+        // Peças importantes do processo, anotadas na audiência (jul/2026).
+        garantirColuna("audiencia", "defesa_previa", "INTEGER NOT NULL DEFAULT 0");
+        garantirColuna("audiencia", "defesa_previa_folha", "TEXT");
+        garantirColuna("audiencia", "fa_cdc", "INTEGER NOT NULL DEFAULT 0");
+        garantirColuna("audiencia", "fa_cdc_folha", "TEXT");
+        garantirColuna("audiencia", "laudo", "INTEGER NOT NULL DEFAULT 0");
+        garantirColuna("audiencia", "laudo_folha", "TEXT");
+
+        // Prisão anotada por participante; o reu_preso da audiência passa a
+        // ser derivado automaticamente (jul/2026).
+        garantirColuna("participacao_audiencia", "preso", "INTEGER NOT NULL DEFAULT 0");
+        garantirColuna("participacao_audiencia", "local_prisao", "TEXT");
+    }
+
+    /**
+     * Verifica se uma coluna existe em uma tabela.
+     *
+     * @param tabela tabela a inspecionar
+     * @param coluna nome da coluna
+     * @return {@code true} se a coluna existir
+     * @throws SQLException se a consulta ao catálogo falhar
+     */
+    private static boolean colunaExiste(String tabela, String coluna) throws SQLException {
+        try (Connection conn = getConnection(); Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("PRAGMA table_info(" + tabela + ")")) {
+            while (rs.next()) {
+                if (coluna.equalsIgnoreCase(rs.getString("name"))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Adiciona uma coluna à tabela caso ela ainda não exista.
+     *
+     * @param tabela    tabela alvo
+     * @param coluna    nome da coluna
+     * @param definicao tipo e restrições da coluna no dialeto SQLite
+     * @throws SQLException se a consulta ao catálogo ou o ALTER TABLE falharem
+     */
+    private static void garantirColuna(String tabela, String coluna, String definicao) throws SQLException {
+        if (!colunaExiste(tabela, coluna)) {
+            try (Connection conn = getConnection(); Statement st = conn.createStatement()) {
+                st.execute("ALTER TABLE " + tabela + " ADD COLUMN " + coluna + " " + definicao);
+            }
         }
     }
 

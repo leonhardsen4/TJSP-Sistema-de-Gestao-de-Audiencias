@@ -26,13 +26,14 @@ class RoutesTest extends TesteBase {
             var criacao = cliente.post("/varas", java.util.Map.of("nome", "1ª Vara"));
             assertEquals(201, criacao.code());
 
+            // Os textos são normalizados em MAIÚSCULAS na gravação.
             var semPrefixo = cliente.get("/varas");
             assertEquals(200, semPrefixo.code());
-            assertTrue(semPrefixo.body().string().contains("1ª Vara"));
+            assertTrue(semPrefixo.body().string().contains("1ª VARA"));
 
             var comPrefixo = cliente.get("/api/varas");
             assertEquals(200, comPrefixo.code());
-            assertTrue(comPrefixo.body().string().contains("1ª Vara"));
+            assertTrue(comPrefixo.body().string().contains("1ª VARA"));
         });
     }
 
@@ -64,28 +65,43 @@ class RoutesTest extends TesteBase {
     }
 
     /**
-     * O fluxo completo de audiência usado pelo formulário deve funcionar:
-     * criar apoios, criar audiência, checar conflito, adicionar e limpar
-     * participantes.
+     * O fluxo completo do fórum deve funcionar via HTTP: criar apoios,
+     * criar a pauta do dia, criar a audiência dentro da pauta (herdando o
+     * cabeçalho), checar conflito, gerenciar participantes e imprimir a
+     * pauta simplificada.
      */
     @Test
-    void fluxoCompletoDeAudienciaDeveFuncionar() {
+    void fluxoCompletoDePautaEAudienciaDeveFuncionar() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
             cliente.post("/varas", java.util.Map.of("nome", "Vara"));
+            cliente.post("/juizes", java.util.Map.of("nome", "Juiz"));
+            cliente.post("/promotores", java.util.Map.of("nome", "Promotor"));
             cliente.post("/pessoas", java.util.Map.of("nome", "Carlos"));
 
-            var criacao = cliente.post("/audiencias", java.util.Map.of(
+            // Audiência avulsa não existe mais: nasce dentro da pauta.
+            var pauta = cliente.post("/pautas", java.util.Map.of(
+                    "data", "2026-07-06", "varaId", 1, "juizId", 1, "promotorId", 1,
+                    "observacoes", "pauta de instrução"));
+            assertEquals(201, pauta.code());
+
+            var criacao = cliente.post("/pautas/1/audiencias", java.util.Map.of(
                     "numeroProcesso", "1234567-89.2026.8.26.0001",
-                    "dataAudiencia", "2026-07-06",
                     "horarioInicio", "10:00",
                     "duracao", 60,
-                    "status", "DESIGNADA",
+                    "status", "PENDENTE",
                     "tipoAudiencia", "JURI",
                     "competencia", "CRIMINAL",
-                    "formato", "PRESENCIAL",
-                    "varaId", 1));
+                    "formato", "PRESENCIAL"));
             assertEquals(201, criacao.code());
-            assertTrue(criacao.body().string().contains("\"horarioFim\":\"11:00\""));
+            String corpoAudiencia = criacao.body().string();
+            assertTrue(corpoAudiencia.contains("\"horarioFim\":\"11:00\""));
+            // Herança rígida da pauta: data e vara vêm do cabeçalho.
+            assertTrue(corpoAudiencia.contains("\"dataAudiencia\":\"2026-07-06\""));
+            assertTrue(corpoAudiencia.contains("\"pautaId\":1"));
+
+            var daPauta = cliente.get("/pautas/1/audiencias");
+            assertEquals(200, daPauta.code());
+            assertTrue(daPauta.body().string().contains("1234567-89.2026.8.26.0001"));
 
             var conflito = cliente.get(
                     "/api/audiencias/verificar-conflitos?data=2026-07-06&horarioInicio=10:30&duracao=60&varaId=1");
@@ -96,11 +112,20 @@ class RoutesTest extends TesteBase {
                     java.util.Map.of("pessoaId", 1, "tipo", "REU"));
             assertEquals(201, participante.code());
 
+            var pdfDaPauta = cliente.get("/pautas/1/pdf");
+            assertEquals(200, pdfDaPauta.code());
+            assertTrue(pdfDaPauta.header("Content-Type").contains("application/pdf"));
+
             var limpeza = cliente.delete("/audiencias/1/participantes");
             assertEquals(204, limpeza.code());
 
             var lista = cliente.get("/audiencias/1/participantes");
             assertEquals("[]", lista.body().string());
+
+            // Excluir a pauta leva junto as audiências (cascata).
+            var exclusao = cliente.delete("/pautas/1");
+            assertEquals(204, exclusao.code());
+            assertEquals(404, cliente.get("/audiencias/1").code());
         });
     }
 
@@ -134,7 +159,8 @@ class RoutesTest extends TesteBase {
     }
 
     /**
-     * A pauta em PDF deve responder com o content-type correto.
+     * A pauta em PDF deve responder com o content-type correto, tanto na
+     * forma antiga (por data) quanto na nova (por filtros).
      */
     @Test
     void pautaPdfDeveResponderComContentTypeDePdf() {
@@ -143,6 +169,55 @@ class RoutesTest extends TesteBase {
             assertEquals(200, resposta.code());
             assertNotNull(resposta.header("Content-Type"));
             assertTrue(resposta.header("Content-Type").contains("application/pdf"));
+
+            var comFiltros = cliente.get("/pauta/pdf?dataInicio=2026-07-01&dataFim=2026-07-31&status=DESIGNADA");
+            assertEquals(200, comFiltros.code());
+            assertTrue(comFiltros.header("Content-Type").contains("application/pdf"));
+        });
+    }
+
+    /**
+     * O fluxo do controle de mandados deve funcionar via HTTP: cadastrar
+     * participante, listar mandados, atualizar a situação e consultar as
+     * pendências.
+     */
+    @Test
+    void fluxoDeMandadosEPendenciasDeveFuncionar() {
+        JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
+            cliente.post("/varas", java.util.Map.of("nome", "Vara"));
+            cliente.post("/juizes", java.util.Map.of("nome", "Juiz"));
+            cliente.post("/promotores", java.util.Map.of("nome", "Promotor"));
+            cliente.post("/pessoas", java.util.Map.of("nome", "Maria"));
+            cliente.post("/pautas", java.util.Map.of(
+                    "data", "2099-07-06", "varaId", 1, "juizId", 1, "promotorId", 1));
+            cliente.post("/pautas/1/audiencias", java.util.Map.of(
+                    "numeroProcesso", "1234567-89.2026.8.26.0001",
+                    "horarioInicio", "10:00",
+                    "duracao", 60,
+                    "status", "PENDENTE",
+                    "tipoAudiencia", "JURI",
+                    "competencia", "CRIMINAL",
+                    "formato", "PRESENCIAL"));
+            cliente.post("/audiencias/1/participantes", java.util.Map.of(
+                    "pessoaId", 1, "tipo", "REU", "folhaIntimacao", "fls. 10"));
+
+            var mandados = cliente.get("/api/mandados?statusMandado=PENDENTE");
+            assertEquals(200, mandados.code());
+            String corpoMandados = mandados.body().string();
+            assertTrue(corpoMandados.contains("\"statusMandado\":\"PENDENTE\""));
+            assertTrue(corpoMandados.contains("fls. 10"));
+
+            var atualizacao = cliente.put("/mandados/1",
+                    java.util.Map.of("statusMandado", "POSITIVO", "intimado", true));
+            assertEquals(200, atualizacao.code());
+            assertTrue(atualizacao.body().string().contains("\"statusMandado\":\"POSITIVO\""));
+
+            var pendencias = cliente.get("/pendencias");
+            assertEquals(200, pendencias.code());
+            String corpoPendencias = pendencias.body().string();
+            assertTrue(corpoPendencias.contains("audienciasSemParte"));
+            assertTrue(corpoPendencias.contains("partesNaoIntimadas"));
+            assertTrue(corpoPendencias.contains("mandadosComProblema"));
         });
     }
 

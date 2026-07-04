@@ -149,7 +149,7 @@ class AudienciaServiceTest extends TesteBase {
     void verificarConflitosDeveIgnorarCanceladas() {
         long varaId = criarVara("Vara");
         Map<String, Object> cancelada = corpoAudiencia(varaId, "2026-07-06", "10:00");
-        cancelada.put("status", "CANCELADA");
+        cancelada.put("status", "NAO_REALIZADA");
         servico.criar(cancelada);
         Map<String, Object> resultado = servico.verificarConflitos(
                 LocalDate.parse("2026-07-06"), "10:00", 60, varaId, null);
@@ -191,6 +191,118 @@ class AudienciaServiceTest extends TesteBase {
         servico.excluir(id);
         assertTrue(participacoes.listar(id).isEmpty());
         assertThrows(ApiException.class, () -> servico.buscarPorId(id));
+    }
+
+    /**
+     * Os filtros combinados da listagem (vara, período, status e texto)
+     * devem restringir o resultado.
+     */
+    @Test
+    void listarComFiltrosDeveRestringirResultado() {
+        long varaA = criarVara("Vara A");
+        long varaB = criarVara("Vara B");
+        servico.criar(corpoAudiencia(varaA, "2026-07-06", "09:00"));
+        Map<String, Object> outra = corpoAudiencia(varaB, "2026-08-10", "14:00");
+        outra.put("status", "REALIZADA");
+        outra.put("observacoes", "réu confesso");
+        servico.criar(outra);
+
+        assertEquals(1, servico.listar(null, String.valueOf(varaA), null, null, null, null, null).size());
+        assertEquals(1, servico.listar(null, null, "2026-08-01", "2026-08-31", null, null, null).size());
+        assertEquals(1, servico.listar(null, null, null, null, "REALIZADA", null, null).size());
+        assertEquals(1, servico.listar(null, null, null, null, null, null, "confesso").size());
+        assertEquals(0, servico.listar(null, String.valueOf(varaA), null, null, "REALIZADA", null, null).size());
+        assertEquals(2, servico.listar(null, null, null, null, null, null, null).size());
+    }
+
+    /**
+     * Audiências encostadas (uma termina quando a outra começa) não devem
+     * ser apontadas como conflito.
+     */
+    @Test
+    void verificarConflitosNaoDeveAcusarAudienciasEncostadas() {
+        long varaId = criarVara("Vara");
+        servico.criar(corpoAudiencia(varaId, "2026-07-06", "10:00")); // 10:00-11:00
+
+        Map<String, Object> encostada = servico.verificarConflitos(
+                LocalDate.parse("2026-07-06"), "11:00", 60, varaId, null);
+        assertEquals(false, encostada.get("temConflito"));
+    }
+
+    /**
+     * O intervalo de segurança deve ser de exatos 30 minutos: um slot que
+     * começa 30 minutos após o fim da audiência ocupada é válido.
+     */
+    @Test
+    void horariosLivresDeveRespeitarIntervaloDeSegurancaExato() {
+        long varaId = criarVara("Vara");
+        servico.criar(corpoAudiencia(varaId, "2026-07-06", "10:00")); // 10:00-11:00
+
+        List<Map<String, Object>> livres = servico.buscarHorariosLivres(
+                varaId, LocalDate.parse("2026-07-06"), LocalDate.parse("2026-07-06"),
+                60, "08:00", "13:00");
+        // 11:30 = fim da ocupada (11:00) + 30 minutos: deve estar livre.
+        assertTrue(livres.stream().anyMatch(h -> h.get("horarioInicio").equals("11:30")));
+        // 08:30-09:30 termina exatamente 30 minutos antes das 10:00: deve estar livre.
+        assertTrue(livres.stream().anyMatch(h -> h.get("horarioInicio").equals("08:30")));
+        // 09:00-10:00 encosta na ocupada sem folga: deve estar bloqueado.
+        assertTrue(livres.stream().noneMatch(h -> h.get("horarioInicio").equals("09:00")));
+        // 11:00 encosta no fim da ocupada sem folga: deve estar bloqueado.
+        assertTrue(livres.stream().noneMatch(h -> h.get("horarioInicio").equals("11:00")));
+    }
+
+    /**
+     * Dias já passados não devem receber sugestões de horários livres.
+     */
+    @Test
+    void horariosLivresNaoDeveSugerirDiasPassados() {
+        long varaId = criarVara("Vara");
+        List<Map<String, Object>> livres = servico.buscarHorariosLivres(
+                varaId, LocalDate.now().minusDays(7), LocalDate.now().minusDays(5),
+                60, "10:00", "13:00");
+        assertTrue(livres.isEmpty());
+    }
+
+    /**
+     * As peças do processo (defesa prévia, FA/CDC e laudo) devem ser
+     * gravadas com a folha; a folha só vale quando a peça está marcada.
+     */
+    @Test
+    void pecasDoProcessoDevemSerGravadasComFolha() {
+        long varaId = criarVara("Vara");
+        Map<String, Object> corpo = corpoAudiencia(varaId, "2026-07-06", "10:00");
+        corpo.put("defesaPrevia", true);
+        corpo.put("defesaPreviaFolha", "fls. 30");
+        corpo.put("laudo", false);
+        corpo.put("laudoFolha", "fls. 99"); // ignorada: peça desmarcada
+
+        Map<String, Object> criada = servico.criar(corpo);
+        assertEquals(true, criada.get("defesaPrevia"));
+        assertEquals("FLS. 30", criada.get("defesaPreviaFolha"));
+        assertEquals(false, criada.get("laudo"));
+        assertEquals(null, criada.get("laudoFolha"));
+    }
+
+    /**
+     * O marcador RP (réu preso) deve ser derivado automaticamente dos
+     * participantes: liga ao adicionar um participante preso e desliga
+     * quando ele é removido.
+     */
+    @Test
+    void reuPresoDeveSerDerivadoDosParticipantes() {
+        long varaId = criarVara("Vara");
+        long id = ((Number) servico.criar(corpoAudiencia(varaId, "2026-07-06", "10:00")).get("id")).longValue();
+        assertEquals(false, servico.buscarPorId(id).get("reuPreso"));
+
+        ParticipacaoService participacoes = new ParticipacaoService();
+        Map<String, Object> participante = participacoes.adicionar(id, Map.of(
+                "pessoaId", criarPessoa("Réu"), "tipo", "REU",
+                "preso", true, "localPrisao", "CDP DE CAIEIRAS"));
+        assertEquals(true, servico.buscarPorId(id).get("reuPreso"));
+        assertEquals("CDP DE CAIEIRAS", participante.get("localPrisao"));
+
+        participacoes.remover(id, ((Number) participante.get("id")).longValue());
+        assertEquals(false, servico.buscarPorId(id).get("reuPreso"));
     }
 
     /**

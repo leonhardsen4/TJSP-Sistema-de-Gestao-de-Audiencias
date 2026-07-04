@@ -1,6 +1,7 @@
 package br.jus.tjsp.audiencias.service;
 
 import br.jus.tjsp.audiencias.config.Database;
+import br.jus.tjsp.audiencias.model.enums.StatusMandado;
 import br.jus.tjsp.audiencias.model.enums.TipoParticipacao;
 import br.jus.tjsp.audiencias.model.enums.TipoRepresentacao;
 import br.jus.tjsp.audiencias.web.ApiException;
@@ -30,7 +31,8 @@ public class ParticipacaoService {
      */
     public List<Map<String, Object>> listar(long audienciaId) {
         return Database.query("""
-                        SELECT pa.id, pa.tipo, pa.intimado, pa.observacoes,
+                        SELECT pa.id, pa.tipo, pa.intimado, pa.status_mandado, pa.folha_intimacao,
+                               pa.preso, pa.local_prisao, pa.observacoes,
                                pe.id AS pessoa_id, pe.nome AS pessoa_nome, pe.cpf AS pessoa_cpf,
                                ra.tipo AS repr_tipo,
                                ad.id AS adv_id, ad.nome AS adv_nome, ad.oab AS adv_oab
@@ -82,11 +84,20 @@ public class ParticipacaoService {
         exigirExistencia("pessoa", pessoaId);
 
         boolean intimado = Boolean.parseBoolean(String.valueOf(dados.getOrDefault("intimado", "false")));
+        String statusMandado = validarStatusMandado(dados.get("statusMandado"));
+        Object folhaIntimacao = dados.get("folhaIntimacao");
+        boolean preso = Boolean.parseBoolean(String.valueOf(dados.getOrDefault("preso", "false")));
+        Object localPrisao = dados.get("localPrisao");
         Object observacoes = dados.get("observacoes");
         long id = Database.insert(
-                "INSERT INTO participacao_audiencia (audiencia_id, pessoa_id, tipo, intimado, observacoes) "
-                        + "VALUES (?, ?, ?, ?, ?)",
-                audienciaId, pessoaId, tipo, intimado, observacoes == null ? null : observacoes.toString());
+                "INSERT INTO participacao_audiencia (audiencia_id, pessoa_id, tipo, intimado, "
+                        + "status_mandado, folha_intimacao, preso, local_prisao, observacoes) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                audienciaId, pessoaId, tipo, intimado, statusMandado,
+                folhaIntimacao == null ? null : folhaIntimacao.toString(),
+                preso, !preso || localPrisao == null ? null : localPrisao.toString(),
+                observacoes == null ? null : observacoes.toString());
+        atualizarReuPreso(audienciaId);
 
         Long advogadoId = lerId(dados, "advogadoId");
         if (advogadoId != null) {
@@ -122,6 +133,7 @@ public class ParticipacaoService {
     public void removerTodos(long audienciaId) {
         Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ?", audienciaId);
         Database.update("DELETE FROM participacao_audiencia WHERE audiencia_id = ?", audienciaId);
+        atualizarReuPreso(audienciaId);
     }
 
     /**
@@ -141,6 +153,23 @@ public class ParticipacaoService {
         Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ? AND cliente_id = ?",
                 audienciaId, pessoaId);
         Database.update("DELETE FROM participacao_audiencia WHERE id = ?", participanteId);
+        atualizarReuPreso(audienciaId);
+    }
+
+    /**
+     * Recalcula o marcador "réu preso" (RP) da audiência: fica ligado
+     * quando ao menos um participante está marcado como preso. Chamado
+     * após qualquer alteração nos participantes.
+     *
+     * @param audienciaId id da audiência
+     */
+    private void atualizarReuPreso(long audienciaId) {
+        Database.update("""
+                        UPDATE audiencia SET reu_preso =
+                            EXISTS (SELECT 1 FROM participacao_audiencia
+                                    WHERE audiencia_id = ? AND preso = 1)
+                        WHERE id = ?
+                        """, audienciaId, audienciaId);
     }
 
     /**
@@ -156,6 +185,10 @@ public class ParticipacaoService {
         p.put("id", rs.getLong("id"));
         p.put("tipo", rs.getString("tipo"));
         p.put("intimado", rs.getInt("intimado") != 0);
+        p.put("statusMandado", rs.getString("status_mandado"));
+        p.put("folhaIntimacao", rs.getString("folha_intimacao"));
+        p.put("preso", rs.getInt("preso") != 0);
+        p.put("localPrisao", rs.getString("local_prisao"));
         p.put("observacoes", rs.getString("observacoes"));
 
         Map<String, Object> pessoa = new LinkedHashMap<>();
@@ -178,6 +211,24 @@ public class ParticipacaoService {
             p.put("representacao", null);
         }
         return p;
+    }
+
+    /**
+     * Valida a situação do mandado recebida da API.
+     *
+     * @param valor valor recebido no campo {@code statusMandado}
+     * @return nome do enum validado; {@code PENDENTE} se o campo vier vazio
+     * @throws ApiException 400 se o valor não for um {@link StatusMandado}
+     */
+    static String validarStatusMandado(Object valor) {
+        if (valor == null || valor.toString().isBlank()) {
+            return StatusMandado.PENDENTE.name();
+        }
+        try {
+            return StatusMandado.valueOf(valor.toString()).name();
+        } catch (IllegalArgumentException e) {
+            throw ApiException.validacao(Map.of("statusMandado", "Situação de mandado inválida: " + valor));
+        }
     }
 
     /**

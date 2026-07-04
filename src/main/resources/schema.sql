@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS vara (
     endereco    TEXT,
     telefone    TEXT,
     email       TEXT,
+    -- Cor de exibição das pautas desta vara no calendário (hex, ex.: #4F46E5)
+    cor         TEXT,
     observacoes TEXT
 );
 
@@ -60,9 +62,24 @@ CREATE TABLE IF NOT EXISTS usuario (
     data_alteracao_senha TEXT
 );
 
+-- Pauta de audiências: agrupa as audiências de um dia em uma vara, com um
+-- mesmo juiz e promotor. Toda audiência pertence a exatamente uma pauta.
+CREATE TABLE IF NOT EXISTS pauta (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    data        TEXT NOT NULL,
+    vara_id     INTEGER NOT NULL REFERENCES vara (id),
+    juiz_id     INTEGER NOT NULL REFERENCES juiz (id),
+    promotor_id INTEGER NOT NULL REFERENCES promotor (id),
+    observacoes TEXT,
+    criacao     TEXT,
+    atualizacao TEXT
+);
+
 CREATE TABLE IF NOT EXISTS audiencia (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     numero_processo     TEXT NOT NULL,
+    -- Pauta à qual a audiência pertence (excluir a pauta exclui as audiências)
+    pauta_id            INTEGER REFERENCES pauta (id) ON DELETE CASCADE,
     vara_id             INTEGER NOT NULL REFERENCES vara (id),
     data_audiencia      TEXT NOT NULL,
     horario_inicio      TEXT NOT NULL,
@@ -75,6 +92,14 @@ CREATE TABLE IF NOT EXISTS audiencia (
     status              TEXT NOT NULL,
     artigo              TEXT,
     observacoes         TEXT,
+    -- Peças importantes do processo: marcação + folha onde se encontram
+    defesa_previa       INTEGER NOT NULL DEFAULT 0,
+    defesa_previa_folha TEXT,
+    fa_cdc              INTEGER NOT NULL DEFAULT 0,
+    fa_cdc_folha        TEXT,
+    laudo               INTEGER NOT NULL DEFAULT 0,
+    laudo_folha         TEXT,
+    -- Derivado automaticamente: 1 quando algum participante está preso
     reu_preso           INTEGER NOT NULL DEFAULT 0,
     agendamento_teams   INTEGER NOT NULL DEFAULT 0,
     reconhecimento      INTEGER NOT NULL DEFAULT 0,
@@ -86,12 +111,19 @@ CREATE TABLE IF NOT EXISTS audiencia (
 );
 
 CREATE TABLE IF NOT EXISTS participacao_audiencia (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    audiencia_id INTEGER NOT NULL REFERENCES audiencia (id) ON DELETE CASCADE,
-    pessoa_id    INTEGER NOT NULL REFERENCES pessoa (id),
-    tipo         TEXT NOT NULL,
-    intimado     INTEGER NOT NULL DEFAULT 0,
-    observacoes  TEXT
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    audiencia_id    INTEGER NOT NULL REFERENCES audiencia (id) ON DELETE CASCADE,
+    pessoa_id       INTEGER NOT NULL REFERENCES pessoa (id),
+    tipo            TEXT NOT NULL,
+    intimado        INTEGER NOT NULL DEFAULT 0,
+    -- Situação do mandado de intimação (enum StatusMandado: PENDENTE, POSITIVO, NEGATIVO, DISPENSADO)
+    status_mandado  TEXT NOT NULL DEFAULT 'PENDENTE',
+    -- Folha do processo onde consta a intimação/mandado
+    folha_intimacao TEXT,
+    -- Participante preso: marcação + local de prisão (reflete no RP da audiência)
+    preso           INTEGER NOT NULL DEFAULT 0,
+    local_prisao    TEXT,
+    observacoes     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS representacao_advogado (
@@ -104,5 +136,8 @@ CREATE TABLE IF NOT EXISTS representacao_advogado (
 
 CREATE INDEX IF NOT EXISTS idx_audiencia_data ON audiencia (data_audiencia);
 CREATE INDEX IF NOT EXISTS idx_audiencia_vara ON audiencia (vara_id);
+-- O índice de audiencia.pauta_id é criado em Database.executarMigracoes,
+-- depois que a coluna existe também em bancos criados por versões antigas.
+CREATE INDEX IF NOT EXISTS idx_pauta_data ON pauta (data);
 CREATE INDEX IF NOT EXISTS idx_participacao_audiencia ON participacao_audiencia (audiencia_id);
 CREATE INDEX IF NOT EXISTS idx_representacao_audiencia ON representacao_advogado (audiencia_id);
