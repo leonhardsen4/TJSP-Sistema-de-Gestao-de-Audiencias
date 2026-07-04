@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS audiencia (
     artigo              TEXT,
     observacoes         TEXT,
     -- Peças importantes do processo: marcação + folha onde se encontram
+    denuncia            INTEGER NOT NULL DEFAULT 0,
+    denuncia_folha      TEXT,
     defesa_previa       INTEGER NOT NULL DEFAULT 0,
     defesa_previa_folha TEXT,
     fa_cdc              INTEGER NOT NULL DEFAULT 0,

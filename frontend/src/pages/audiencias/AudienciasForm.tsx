@@ -68,6 +68,8 @@ interface AudienciaForm {
   processo: string;
   artigo: string;
   observacoes: string;
+  denuncia: boolean;
+  denunciaFolha: string;
   defesaPrevia: boolean;
   defesaPreviaFolha: string;
   faCdc: boolean;
@@ -119,8 +121,9 @@ const PARTICIPANTE_VAZIO: ParticipanteForm = {
 
 /** Peças do processo: campo booleano, campo da folha e rótulo exibido. */
 const PECAS: { flag: keyof AudienciaForm; folha: keyof AudienciaForm; rotulo: string }[] = [
+  { flag: 'denuncia', folha: 'denunciaFolha', rotulo: 'Denúncia' },
   { flag: 'defesaPrevia', folha: 'defesaPreviaFolha', rotulo: 'Defesa Prévia' },
-  { flag: 'faCdc', folha: 'faCdcFolha', rotulo: 'FA e Certidão de Distribuições Criminais' },
+  { flag: 'faCdc', folha: 'faCdcFolha', rotulo: 'FA e Certidão do Distribuidor' },
   { flag: 'laudo', folha: 'laudoFolha', rotulo: 'Laudo' }
 ];
 
@@ -159,6 +162,8 @@ const FormAudiencia: React.FC = () => {
     processo: '',
     artigo: '',
     observacoes: '',
+    denuncia: false,
+    denunciaFolha: '',
     defesaPrevia: false,
     defesaPreviaFolha: '',
     faCdc: false,
@@ -209,6 +214,8 @@ const FormAudiencia: React.FC = () => {
             processo: audiencia.numeroProcesso,
             artigo: audiencia.artigo || '',
             observacoes: audiencia.observacoes || '',
+            denuncia: audiencia.denuncia || false,
+            denunciaFolha: audiencia.denunciaFolha || '',
             defesaPrevia: audiencia.defesaPrevia || false,
             defesaPreviaFolha: audiencia.defesaPreviaFolha || '',
             faCdc: audiencia.faCdc || false,
@@ -319,6 +326,8 @@ const FormAudiencia: React.FC = () => {
         formato: anterior.formato || '',
         artigo: anterior.artigo || '',
         observacoes: anterior.observacoes || '',
+        denuncia: anterior.denuncia || false,
+        denunciaFolha: anterior.denunciaFolha || '',
         defesaPrevia: anterior.defesaPrevia || false,
         defesaPreviaFolha: anterior.defesaPreviaFolha || '',
         faCdc: anterior.faCdc || false,
@@ -557,6 +566,8 @@ const FormAudiencia: React.FC = () => {
         formato: formData.formato,
         artigo: formData.artigo,
         observacoes: formData.observacoes,
+        denuncia: formData.denuncia,
+        denunciaFolha: formData.denunciaFolha,
         defesaPrevia: formData.defesaPrevia,
         defesaPreviaFolha: formData.defesaPreviaFolha,
         faCdc: formData.faCdc,
@@ -783,10 +794,10 @@ const FormAudiencia: React.FC = () => {
           <p className="text-gray-500 text-sm mb-4">
             Marque as peças presentes e anote a folha onde se encontram — elas saem na pauta em PDF.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="space-y-3">
             {PECAS.map(({ flag, folha, rotulo }) => (
-              <div key={flag}>
-                <label className="flex items-center text-gray-700 text-sm font-bold cursor-pointer mb-2">
+              <div key={flag} className="flex items-center gap-3">
+                <label className="flex items-center text-gray-700 text-sm font-bold cursor-pointer w-72 shrink-0">
                   <input
                     type="checkbox"
                     name={flag}
@@ -796,17 +807,16 @@ const FormAudiencia: React.FC = () => {
                   />
                   {rotulo}
                 </label>
-                {formData[flag] && (
-                  <input
-                    className={INPUT}
-                    name={folha}
-                    type="text"
-                    placeholder="EX.: FLS. 30"
-                    maxLength={30}
-                    value={formData[folha] as string}
-                    onChange={handleChange}
-                  />
-                )}
+                <input
+                  className={`${INPUT} flex-1 ${formData[flag] ? '' : 'bg-gray-100 text-gray-400'}`}
+                  name={folha}
+                  type="text"
+                  placeholder={formData[flag] ? 'Folha (ex.: FLS. 30)' : '—'}
+                  maxLength={30}
+                  value={formData[folha] as string}
+                  onChange={handleChange}
+                  disabled={!formData[flag]}
+                />
               </div>
             ))}
           </div>

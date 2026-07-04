@@ -258,6 +258,9 @@ Ações efetivas desta sessão:
   client-side; `fetch` com `localhost:8080` cravado viraram relativos.
 - **Limpeza**: removidos `PaginatedTable`, `SortableTable`, `utils/validation.ts` e
   `CalendarioAudiencias` (órfãos).
+- **Nova peça "Denúncia"** nas Peças do Processo (coluna `denuncia`/`denuncia_folha`):
+  aparece no cadastro/edição (peças empilhadas, com a folha ao lado), no detalhe e no
+  PDF. As peças ficam na ordem: Denúncia, Defesa Prévia, FA/CDC, Laudo.
 - **Distribuição autocontida** (ver `DISTRIBUICAO.md`): `mvn package` embute o frontend
   no JAR (`/public`); `empacotar-distribuivel.sh` gera pacotes Windows/Linux **com um
   Java 17 portátil embutido** — rodam sem instalar Java e sem admin. Necessário porque as

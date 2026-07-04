@@ -24,6 +24,8 @@ interface Audiencia {
   agendamentoTeams: boolean;
   reconhecimento: boolean;
   depoimentoEspecial: boolean;
+  denuncia?: boolean;
+  denunciaFolha?: string;
   defesaPrevia?: boolean;
   defesaPreviaFolha?: string;
   faCdc?: boolean;
@@ -316,10 +318,15 @@ const AudienciasDetail: React.FC = () => {
           )}
 
           {/* Peças processuais juntadas (com a folha, quando informada) */}
-          {(audiencia.defesaPrevia || audiencia.faCdc || audiencia.laudo) && (
+          {(audiencia.denuncia || audiencia.defesaPrevia || audiencia.faCdc || audiencia.laudo) && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Peças</h3>
               <div className="flex flex-wrap gap-2">
+                {audiencia.denuncia && (
+                  <Badge className="bg-slate-100 text-slate-800 text-sm">
+                    Denúncia{audiencia.denunciaFolha ? ` (fls. ${audiencia.denunciaFolha})` : ''}
+                  </Badge>
+                )}
                 {audiencia.defesaPrevia && (
                   <Badge className="bg-slate-100 text-slate-800 text-sm">
                     Defesa prévia{audiencia.defesaPreviaFolha ? ` (fls. ${audiencia.defesaPreviaFolha})` : ''}

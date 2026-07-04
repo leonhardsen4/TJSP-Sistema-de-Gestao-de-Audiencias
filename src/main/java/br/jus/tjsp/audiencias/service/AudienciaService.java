@@ -200,14 +200,15 @@ public class AudienciaService {
         long id = Database.insert("""
                         INSERT INTO audiencia (numero_processo, pauta_id, vara_id, data_audiencia, horario_inicio,
                             duracao, horario_fim, dia_semana, tipo_audiencia, formato, competencia, status, artigo,
-                            observacoes, defesa_previa, defesa_previa_folha, fa_cdc, fa_cdc_folha, laudo,
-                            laudo_folha, reu_preso, agendamento_teams, reconhecimento, depoimento_especial,
-                            juiz_id, promotor_id, criacao, atualizacao)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            observacoes, denuncia, denuncia_folha, defesa_previa, defesa_previa_folha, fa_cdc,
+                            fa_cdc_folha, laudo, laudo_folha, reu_preso, agendamento_teams, reconhecimento,
+                            depoimento_especial, juiz_id, promotor_id, criacao, atualizacao)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 v.numeroProcesso, v.pautaId, v.varaId, v.data.toString(), v.inicio.format(FORMATO_HORA), v.duracao,
                 v.fim.format(FORMATO_HORA), v.diaSemana, v.tipo, v.formato, v.competencia, v.status, v.artigo,
-                v.observacoes, v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
+                v.observacoes, v.denuncia, v.denunciaFolha,
+                v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
                 // reu_preso é derivado dos participantes presos; nasce desmarcado.
                 false, v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
                 v.juizId, v.promotorId, agora, agora);
@@ -278,7 +279,8 @@ public class AudienciaService {
         Database.update("""
                         UPDATE audiencia SET numero_processo = ?, vara_id = ?, data_audiencia = ?, horario_inicio = ?,
                             duracao = ?, horario_fim = ?, dia_semana = ?, tipo_audiencia = ?, formato = ?,
-                            competencia = ?, status = ?, artigo = ?, observacoes = ?, defesa_previa = ?,
+                            competencia = ?, status = ?, artigo = ?, observacoes = ?, denuncia = ?,
+                            denuncia_folha = ?, defesa_previa = ?,
                             defesa_previa_folha = ?, fa_cdc = ?, fa_cdc_folha = ?, laudo = ?, laudo_folha = ?,
                             agendamento_teams = ?, reconhecimento = ?, depoimento_especial = ?, juiz_id = ?,
                             promotor_id = ?, atualizacao = ?
@@ -286,7 +288,8 @@ public class AudienciaService {
                         """,
                 v.numeroProcesso, v.varaId, v.data.toString(), v.inicio.format(FORMATO_HORA), v.duracao,
                 v.fim.format(FORMATO_HORA), v.diaSemana, v.tipo, v.formato, v.competencia, v.status, v.artigo,
-                v.observacoes, v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
+                v.observacoes, v.denuncia, v.denunciaFolha,
+                v.defesaPrevia, v.defesaPreviaFolha, v.faCdc, v.faCdcFolha, v.laudo, v.laudoFolha,
                 v.agendamentoTeams, v.reconhecimento, v.depoimentoEspecial,
                 v.juizId, v.promotorId, LocalDateTime.now().toString(), id);
         return buscarPorId(id);
@@ -461,6 +464,8 @@ public class AudienciaService {
         a.put("status", rs.getString("status"));
         a.put("artigo", rs.getString("artigo"));
         a.put("observacoes", rs.getString("observacoes"));
+        a.put("denuncia", rs.getInt("denuncia") != 0);
+        a.put("denunciaFolha", rs.getString("denuncia_folha"));
         a.put("defesaPrevia", rs.getInt("defesa_previa") != 0);
         a.put("defesaPreviaFolha", rs.getString("defesa_previa_folha"));
         a.put("faCdc", rs.getInt("fa_cdc") != 0);
@@ -515,6 +520,8 @@ public class AudienciaService {
         String status;
         String artigo;
         String observacoes;
+        boolean denuncia;
+        String denunciaFolha;
         boolean defesaPrevia;
         String defesaPreviaFolha;
         boolean faCdc;
@@ -619,6 +626,8 @@ public class AudienciaService {
         v.artigo = Textos.maiusculas(texto(dados, "artigo"));
         v.observacoes = Textos.maiusculas(texto(dados, "observacoes"));
         // Peças do processo: a folha só é gravada quando a peça está marcada.
+        v.denuncia = booleano(dados, "denuncia");
+        v.denunciaFolha = v.denuncia ? Textos.maiusculas(texto(dados, "denunciaFolha")) : null;
         v.defesaPrevia = booleano(dados, "defesaPrevia");
         v.defesaPreviaFolha = v.defesaPrevia ? Textos.maiusculas(texto(dados, "defesaPreviaFolha")) : null;
         v.faCdc = booleano(dados, "faCdc");

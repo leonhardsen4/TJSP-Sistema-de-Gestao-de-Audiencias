@@ -455,6 +455,7 @@ public class PautaPdfService {
      */
     private static String descricaoPecas(Map<String, Object> audiencia) {
         List<String> pecas = new ArrayList<>();
+        adicionarPeca(pecas, audiencia, "denuncia", "denunciaFolha", "Denúncia");
         adicionarPeca(pecas, audiencia, "defesaPrevia", "defesaPreviaFolha", "Defesa Prévia");
         adicionarPeca(pecas, audiencia, "faCdc", "faCdcFolha", "FA/CDC");
         adicionarPeca(pecas, audiencia, "laudo", "laudoFolha", "Laudo");

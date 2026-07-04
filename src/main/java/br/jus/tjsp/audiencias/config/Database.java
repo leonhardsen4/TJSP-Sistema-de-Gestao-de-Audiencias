@@ -138,6 +138,8 @@ public final class Database {
         garantirColuna("vara", "cor", "TEXT");
 
         // Peças importantes do processo, anotadas na audiência (jul/2026).
+        garantirColuna("audiencia", "denuncia", "INTEGER NOT NULL DEFAULT 0");
+        garantirColuna("audiencia", "denuncia_folha", "TEXT");
         garantirColuna("audiencia", "defesa_previa", "INTEGER NOT NULL DEFAULT 0");
         garantirColuna("audiencia", "defesa_previa_folha", "TEXT");
         garantirColuna("audiencia", "fa_cdc", "INTEGER NOT NULL DEFAULT 0");
