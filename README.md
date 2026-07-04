@@ -61,6 +61,19 @@ java -jar target/audiencias-1.0.0.jar reset-senha <emailOuMatricula> <novaSenha>
 
 O usuário será obrigado a trocar a senha no próximo login.
 
+### Levar para outra máquina (sem instalar Java)
+
+Para rodar em um computador que não tem Java 17+ (ex.: estações que só têm
+Java 8), gere os pacotes autocontidos — cada um traz um Java portátil embutido:
+
+```bash
+./empacotar-distribuivel.sh
+```
+
+Produz em `dist/` um `.zip` (Windows) e um `.tar.gz` (Linux). Basta extrair e
+iniciar (`Iniciar-Sistema.bat` ou `iniciar-sistema.sh`). Detalhes e cuidados de
+rede em [`DISTRIBUICAO.md`](DISTRIBUICAO.md).
+
 ## 🧪 Testes
 
 ```bash
@@ -82,23 +95,31 @@ mvn test
 
 ### Frontend (`frontend/src/`)
 ```
-├── components/         # componentes reutilizáveis (login, tabelas, formulários)
-├── pages/              # páginas (audiências, varas, juízes, promotores,
-│                       #   advogados, pessoas, horários livres, dashboard)
+├── components/         # componentes reutilizáveis (login, DataTable, formulários)
+├── pages/              # páginas (dashboard, pautas, audiências, mandados, varas,
+│                       #   juízes, promotores, advogados, pessoas, configurações)
 ├── contexts/           # autenticação (localStorage)
-└── services/api.ts     # cliente axios para o backend
+└── services/api.ts     # cliente axios para o backend (prefixo /api)
 ```
 
 ## 📱 Funcionalidades
 
-- Dashboard com resumo de audiências
-- CRUD completo: audiências, varas, juízes, promotores, advogados, pessoas
-- Participantes por audiência, com advogado e tipo de representação
+- **Dashboard** com resumo e pendências (audiências vencidas, partes não intimadas,
+  mandados com problema)
+- **Pautas**: a audiência nasce dentro de uma pauta (data/vara/juiz/promotor herdados);
+  calendário mês/semana/dia na tela de Pautas, com horários livres por pauta
+- **Audiências**: tabela com filtros colapsáveis e persistentes; partes por audiência
+  (réu, vítima, testemunhas...) com advogado, intimação e situação do mandado; réu preso
+  derivado das partes
+- **Mandados e pendências**: acompanhamento da situação das intimações
+- **Documentos em PDF** com timbre oficial (brasão + Tribunal/Comarca): pauta e relação
+  de audiências; exportação em CSV e PDF paisagem
+- **Configurações**: dados do usuário, troca de senha e **backup** (CSV + cópia do banco
+  na pasta `backups/`, automático semanal e sob demanda)
 - Verificação de conflitos de horário por vara (consultiva, com confirmação)
-- Busca de horários livres por período
-- Pauta do dia em PDF
-- Login por e-mail ou matrícula (senhas com hash BCrypt)
-- Datas exibidas sempre em `dd/MM/yyyy`
+- Login por e-mail ou matrícula (senhas com hash BCrypt); datas sempre em `dd/MM/yyyy`
+
+> A API é servida sob o prefixo `/api`; os demais caminhos pertencem ao SPA (React).
 
 ## 🎨 Tecnologias
 
