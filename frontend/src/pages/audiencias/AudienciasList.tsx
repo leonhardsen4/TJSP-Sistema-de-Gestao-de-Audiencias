@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../../services/api';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import DataTable from '../../components/DataTable';
-import CalendarioAudiencias from './CalendarioAudiencias';
 
 /**
- * Tela de audiências: listagem em tabela ou calendário (mês/semana/dia),
- * com filtros por vara, data exata, período, tipo, status, competência e
- * busca textual. A pauta em PDF é gerada com os mesmos filtros aplicados.
+ * Tela de audiências: listagem em tabela, com filtros por vara, data exata,
+ * período, tipo, status, competência e busca textual. A pauta em PDF é
+ * gerada com os mesmos filtros aplicados. A visão de calendário
+ * (mês/semana/dia) fica na tela de Pautas.
  */
 
 export interface Audiencia {
@@ -58,6 +58,25 @@ const FILTROS_VAZIOS: Filtros = {
   reuPreso: '', depoimentoEspecial: '', agendamentoTeams: ''
 };
 
+/**
+ * Chaves de persistência dos filtros e do estado do painel na sessão do
+ * navegador. Assim, ao entrar em uma audiência e voltar, os filtros
+ * aplicados continuam valendo.
+ */
+const STORAGE_FILTROS = 'audiencias:filtros';
+const STORAGE_PAINEL = 'audiencias:filtrosAbertos';
+
+/** Lê os filtros salvos na sessão (ou os vazios, se não houver). */
+const lerFiltrosSalvos = (): Filtros => {
+  try {
+    const bruto = sessionStorage.getItem(STORAGE_FILTROS);
+    if (bruto) return { ...FILTROS_VAZIOS, ...JSON.parse(bruto) };
+  } catch {
+    /* Sessão indisponível ou dado corrompido: usa os filtros vazios. */
+  }
+  return FILTROS_VAZIOS;
+};
+
 /** Rótulos legíveis dos enums exibidos na tela. */
 export const rotuloStatus: Record<string, string> = {
   PENDENTE: 'Pendente',
@@ -106,12 +125,24 @@ const getCompetenciaBadgeClass = (competencia: string): string => {
 };
 
 const AudienciasList: React.FC = () => {
+  const navigate = useNavigate();
   const [audiencias, setAudiencias] = useState<Audiencia[]>([]);
   const [varas, setVaras] = useState<Vara[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [filtros, setFiltros] = useState<Filtros>(FILTROS_VAZIOS);
-  const [visao, setVisao] = useState<'tabela' | 'calendario'>('tabela');
+  const [filtros, setFiltros] = useState<Filtros>(lerFiltrosSalvos);
+  const [filtrosAbertos, setFiltrosAbertos] = useState<boolean>(
+    () => sessionStorage.getItem(STORAGE_PAINEL) !== 'false'
+  );
+
+  // Persiste os filtros e o estado do painel na sessão (sobrevive à
+  // navegação para o detalhe/edição e à volta para esta tela).
+  useEffect(() => {
+    sessionStorage.setItem(STORAGE_FILTROS, JSON.stringify(filtros));
+  }, [filtros]);
+  useEffect(() => {
+    sessionStorage.setItem(STORAGE_PAINEL, String(filtrosAbertos));
+  }, [filtrosAbertos]);
 
   const carregarAudiencias = async () => {
     try {
@@ -241,32 +272,14 @@ const AudienciasList: React.FC = () => {
     }
   };
 
-  const filtrosAtivos = Object.values(filtros).some(v => v !== '');
+  const qtdFiltrosAtivos = Object.values(filtros).filter(v => v !== '').length;
+  const filtrosAtivos = qtdFiltrosAtivos > 0;
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
         <h1 className="text-2xl font-bold text-gray-800">Audiências</h1>
         <div className="flex gap-2">
-          {/* Alternância entre tabela e calendário */}
-          <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
-            <button
-              onClick={() => setVisao('tabela')}
-              className={`px-4 py-2 text-sm font-medium ${
-                visao === 'tabela' ? 'bg-blue-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              Tabela
-            </button>
-            <button
-              onClick={() => setVisao('calendario')}
-              className={`px-4 py-2 text-sm font-medium ${
-                visao === 'calendario' ? 'bg-blue-900 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              Calendário
-            </button>
-          </div>
           <button
             onClick={handleImprimirPauta}
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
@@ -299,20 +312,39 @@ const AudienciasList: React.FC = () => {
         </div>
       </div>
 
-      {/* Painel de filtros */}
+      {/* Painel de filtros (colapsável) */}
       <div className="bg-white p-4 rounded-lg shadow-md mb-6">
-        <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-semibold">Filtros</h2>
-          {filtrosAtivos && (
-            <button
-              onClick={() => setFiltros(FILTROS_VAZIOS)}
-              className="text-sm text-blue-700 hover:text-blue-900 underline"
-            >
-              Limpar filtros
-            </button>
-          )}
+        <div className="flex flex-wrap justify-between items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFiltrosAbertos(aberto => !aberto)}
+            className="flex items-center gap-2 text-lg font-semibold text-gray-800 hover:text-blue-900"
+            title={filtrosAbertos ? 'Recolher filtros' : 'Expandir filtros'}
+          >
+            <span className={`inline-block transition-transform ${filtrosAbertos ? 'rotate-90' : ''}`}>▸</span>
+            Filtros
+            {qtdFiltrosAtivos > 0 && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                {qtdFiltrosAtivos} aplicado{qtdFiltrosAtivos > 1 ? 's' : ''}
+              </span>
+            )}
+          </button>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-gray-500">
+              {audienciasFiltradas.length} audiência(s)
+              {filtrosAtivos ? ' com filtros' : ''}
+            </span>
+            {filtrosAtivos && (
+              <button
+                onClick={() => setFiltros(FILTROS_VAZIOS)}
+                className="text-blue-700 hover:text-blue-900 underline"
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3 ${filtrosAbertos ? '' : 'hidden'}`}>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Vara</label>
             <select
@@ -430,10 +462,6 @@ const AudienciasList: React.FC = () => {
             </div>
           ))}
         </div>
-        <p className="text-sm text-gray-500 mt-3">
-          {audienciasFiltradas.length} audiência(s) encontrada(s)
-          {filtrosAtivos ? ' com os filtros aplicados' : ''}.
-        </p>
       </div>
 
       {loading && (
@@ -449,15 +477,7 @@ const AudienciasList: React.FC = () => {
         </div>
       )}
 
-      {!loading && !error && visao === 'calendario' && (
-        <CalendarioAudiencias
-          audiencias={audienciasFiltradas}
-          todasAudiencias={audiencias}
-          onExcluir={handleDelete}
-        />
-      )}
-
-      {!loading && !error && visao === 'tabela' && (
+      {!loading && !error && (
         <DataTable
           data={audienciasFiltradas}
           storageKey="audiencias"
@@ -529,8 +549,11 @@ const AudienciasList: React.FC = () => {
             {
               label: 'Pauta',
               onClick: (row: Audiencia) => {
+                // Navegação client-side (React Router): não recarrega a página,
+                // evitando a colisão com a rota de API de mesmo caminho
+                // (/pautas/{id}), que devolveria JSON numa recarga completa.
                 if (row.pautaId) {
-                  window.location.href = `/pautas/${row.pautaId}`;
+                  navigate(`/pautas/${row.pautaId}`);
                 }
               },
               className: 'bg-purple-100 text-purple-700 hover:bg-purple-200'

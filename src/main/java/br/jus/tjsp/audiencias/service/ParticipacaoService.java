@@ -89,34 +89,41 @@ public class ParticipacaoService {
         boolean preso = Boolean.parseBoolean(String.valueOf(dados.getOrDefault("preso", "false")));
         Object localPrisao = dados.get("localPrisao");
         Object observacoes = dados.get("observacoes");
-        long id = Database.insert(
-                "INSERT INTO participacao_audiencia (audiencia_id, pessoa_id, tipo, intimado, "
-                        + "status_mandado, folha_intimacao, preso, local_prisao, observacoes) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                audienciaId, pessoaId, tipo, intimado, statusMandado,
-                folhaIntimacao == null ? null : folhaIntimacao.toString(),
-                preso, !preso || localPrisao == null ? null : localPrisao.toString(),
-                observacoes == null ? null : observacoes.toString());
-        atualizarReuPreso(audienciaId);
+        final String tipoFinal = tipo;
+        final Long pessoaIdFinal = pessoaId;
+        // Atômico: a participação, o recálculo do réu preso e a eventual
+        // representação de advogado são gravados juntos (ou nada é gravado).
+        long id = Database.executarEmTransacao(() -> {
+            long novoId = Database.insert(
+                    "INSERT INTO participacao_audiencia (audiencia_id, pessoa_id, tipo, intimado, "
+                            + "status_mandado, folha_intimacao, preso, local_prisao, observacoes) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    audienciaId, pessoaIdFinal, tipoFinal, intimado, statusMandado,
+                    folhaIntimacao == null ? null : folhaIntimacao.toString(),
+                    preso, !preso || localPrisao == null ? null : localPrisao.toString(),
+                    observacoes == null ? null : observacoes.toString());
+            atualizarReuPreso(audienciaId);
 
-        Long advogadoId = lerId(dados, "advogadoId");
-        if (advogadoId != null) {
-            exigirExistencia("advogado", advogadoId);
-            String tipoRepresentacao = TipoRepresentacao.DEFESA.name();
-            Object tipoReprValor = dados.get("tipoRepresentacao");
-            if (tipoReprValor != null && !tipoReprValor.toString().isBlank()) {
-                try {
-                    tipoRepresentacao = TipoRepresentacao.valueOf(tipoReprValor.toString()).name();
-                } catch (IllegalArgumentException e) {
-                    throw ApiException.validacao(
-                            Map.of("tipoRepresentacao", "Tipo de representação inválido: " + tipoReprValor));
+            Long advogadoId = lerId(dados, "advogadoId");
+            if (advogadoId != null) {
+                exigirExistencia("advogado", advogadoId);
+                String tipoRepresentacao = TipoRepresentacao.DEFESA.name();
+                Object tipoReprValor = dados.get("tipoRepresentacao");
+                if (tipoReprValor != null && !tipoReprValor.toString().isBlank()) {
+                    try {
+                        tipoRepresentacao = TipoRepresentacao.valueOf(tipoReprValor.toString()).name();
+                    } catch (IllegalArgumentException e) {
+                        throw ApiException.validacao(
+                                Map.of("tipoRepresentacao", "Tipo de representação inválido: " + tipoReprValor));
+                    }
                 }
+                Database.insert(
+                        "INSERT INTO representacao_advogado (audiencia_id, advogado_id, cliente_id, tipo) "
+                                + "VALUES (?, ?, ?, ?)",
+                        audienciaId, advogadoId, pessoaIdFinal, tipoRepresentacao);
             }
-            Database.insert(
-                    "INSERT INTO representacao_advogado (audiencia_id, advogado_id, cliente_id, tipo) "
-                            + "VALUES (?, ?, ?, ?)",
-                    audienciaId, advogadoId, pessoaId, tipoRepresentacao);
-        }
+            return novoId;
+        });
 
         return listar(audienciaId).stream()
                 .filter(p -> ((Number) p.get("id")).longValue() == id)
@@ -131,9 +138,34 @@ public class ParticipacaoService {
      * @param audienciaId id da audiência
      */
     public void removerTodos(long audienciaId) {
-        Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ?", audienciaId);
-        Database.update("DELETE FROM participacao_audiencia WHERE audiencia_id = ?", audienciaId);
-        atualizarReuPreso(audienciaId);
+        Database.executarEmTransacao(() -> {
+            Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ?", audienciaId);
+            Database.update("DELETE FROM participacao_audiencia WHERE audiencia_id = ?", audienciaId);
+            atualizarReuPreso(audienciaId);
+        });
+    }
+
+    /**
+     * Substitui, de forma atômica, toda a relação de partes de uma audiência:
+     * remove as existentes e grava a lista informada dentro de uma única
+     * transação. Se qualquer parte da lista for inválida, nada é alterado.
+     *
+     * @param audienciaId  id da audiência
+     * @param participantes lista de partes a gravar (pode ser vazia)
+     * @return a nova relação de partes da audiência
+     * @throws ApiException 404 se a audiência não existir; 400 se algum dado for inválido
+     */
+    public List<Map<String, Object>> substituir(long audienciaId, List<Map<String, Object>> participantes) {
+        exigirExistencia("audiencia", audienciaId);
+        Database.executarEmTransacao(() -> {
+            removerTodos(audienciaId);
+            if (participantes != null) {
+                for (Map<String, Object> parte : participantes) {
+                    adicionar(audienciaId, parte);
+                }
+            }
+        });
+        return listar(audienciaId);
     }
 
     /**
@@ -150,10 +182,12 @@ public class ParticipacaoService {
                         rs -> rs.getLong(1), participanteId, audienciaId)
                 .orElseThrow(() -> ApiException.naoEncontrado(
                         "Participante não encontrado com id " + participanteId));
-        Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ? AND cliente_id = ?",
-                audienciaId, pessoaId);
-        Database.update("DELETE FROM participacao_audiencia WHERE id = ?", participanteId);
-        atualizarReuPreso(audienciaId);
+        Database.executarEmTransacao(() -> {
+            Database.update("DELETE FROM representacao_advogado WHERE audiencia_id = ? AND cliente_id = ?",
+                    audienciaId, pessoaId);
+            Database.update("DELETE FROM participacao_audiencia WHERE id = ?", participanteId);
+            atualizarReuPreso(audienciaId);
+        });
     }
 
     /**

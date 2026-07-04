@@ -133,6 +133,33 @@ public class UsuarioService {
     }
 
     /**
+     * Atualiza os dados de perfil (nome e e-mail) do usuário. Não altera
+     * senha, matrícula ou telefone.
+     *
+     * @param id    id do usuário
+     * @param dados corpo com {@code nomeCompleto} e {@code email}
+     * @return usuário atualizado (sem a senha)
+     * @throws ApiException 404 se o usuário não existir; 400 se algum campo for
+     *                      inválido ou o e-mail já pertencer a outro usuário
+     */
+    public Map<String, Object> atualizarPerfil(long id, Map<String, Object> dados) {
+        buscarPorId(id);
+        String nome = texto(dados, "nomeCompleto");
+        String email = texto(dados, "email");
+        if (nome == null || nome.length() < 2 || nome.length() > 100) {
+            throw new ApiException(400, "Nome completo deve ter entre 2 e 100 caracteres");
+        }
+        if (email == null || !PADRAO_EMAIL.matcher(email).matches()) {
+            throw new ApiException(400, "E-mail inválido");
+        }
+        if (Database.count("SELECT COUNT(*) FROM usuario WHERE email = ? AND id <> ?", email, id) > 0) {
+            throw new ApiException(400, "E-mail já cadastrado para outro usuário");
+        }
+        Database.update("UPDATE usuario SET nome_completo = ?, email = ? WHERE id = ?", nome, email, id);
+        return buscarPorId(id);
+    }
+
+    /**
      * Busca um usuário pelo id, sem expor a senha.
      *
      * @param id identificador do usuário

@@ -91,7 +91,7 @@ const CadastroForm = ({ onCadastroSucesso, onVoltarLogin }) => {
         setSucesso('');
 
         try {
-            const response = await fetch('http://localhost:8080/api/usuarios/cadastrar', {
+            const response = await fetch('/api/usuarios/cadastrar', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

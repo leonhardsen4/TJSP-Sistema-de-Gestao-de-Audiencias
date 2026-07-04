@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { maskProcessoCNJ, processoCNJCompleto, toUpper } from '../../utils/masks';
-import { TIPOS_PARTICIPACAO, PARTES_PRINCIPAIS, rotuloTipoParticipacao } from '../../utils/participacao';
+import { TIPOS_PARTICIPACAO, PARTES_PRINCIPAIS, rotuloTipoParticipacao, ordemExibicaoParte } from '../../utils/participacao';
 
 /**
  * Formulário de audiência — sempre vinculada a uma pauta.
@@ -265,8 +265,21 @@ const FormAudiencia: React.FC = () => {
       tipoRepresentacao: p.representacao?.tipo || undefined
     }));
 
-  /** Rota de retorno: a pauta da audiência, ou a lista de audiências. */
+  /**
+   * Destino de fallback quando não há histórico de navegação (a tela foi
+   * aberta por link direto): a pauta da audiência, ou a lista de audiências.
+   */
   const rotaDeVolta = pauta ? `/pautas/${pauta.id}` : '/audiencias';
+
+  /**
+   * Volta para a tela anterior de onde o formulário foi aberto (a lista de
+   * audiências com seus filtros, o calendário, a pauta...). Sem histórico
+   * dentro do app, usa a rota de fallback.
+   */
+  const voltar = () => {
+    if (location.key !== 'default') navigate(-1);
+    else navigate(rotaDeVolta);
+  };
 
   /**
    * Procura a audiência anterior mais recente do mesmo processo e oferece
@@ -462,7 +475,7 @@ const FormAudiencia: React.FC = () => {
 
     const reus = participantes
       .filter(p => PARTES_PRINCIPAIS.includes(p.tipo))
-      .map(p => nomePessoa(p.pessoaId)
+      .map(p => 'Réu: ' + nomePessoa(p.pessoaId)
         + (p.preso ? ` (PRESO${p.localPrisao ? ' - ' + p.localPrisao : ''})` : ''));
 
     return [linha1, '', mensagem, '', ...reus].join('\n').trimEnd();
@@ -564,29 +577,31 @@ const FormAudiencia: React.FC = () => {
         audienciaId = response.data.id;
       }
 
-      // Regrava a lista completa de participantes (limpa mesmo se vazia).
-      if (isEdicao) {
-        await api.delete(`/audiencias/${audienciaId}/participantes`);
-      }
-      for (const p of participantes.filter(pt => pt.pessoaId > 0)) {
-        const participantePayload: any = {
-          pessoaId: Number(p.pessoaId),
-          tipo: p.tipo,
-          intimado: p.intimado || false,
-          statusMandado: p.statusMandado || 'PENDENTE',
-          folhaIntimacao: p.folhaIntimacao || '',
-          preso: p.preso || false,
-          localPrisao: p.preso ? p.localPrisao || '' : '',
-          observacoes: p.observacoes || ''
-        };
-        if (p.advogadoId && p.advogadoId > 0) {
-          participantePayload.advogadoId = Number(p.advogadoId);
-          participantePayload.tipoRepresentacao = p.tipoRepresentacao || 'DEFESA';
-        }
-        await api.post(`/audiencias/${audienciaId}/participantes`, participantePayload);
-      }
+      // Regrava toda a relação de partes numa única chamada atômica: o
+      // servidor limpa as antigas e grava as novas dentro de uma transação
+      // (evita ficar com a lista pela metade se algo falhar no meio).
+      const partesPayload = participantes
+        .filter(pt => pt.pessoaId > 0)
+        .map(p => {
+          const parte: any = {
+            pessoaId: Number(p.pessoaId),
+            tipo: p.tipo,
+            intimado: p.intimado || false,
+            statusMandado: p.statusMandado || 'PENDENTE',
+            folhaIntimacao: p.folhaIntimacao || '',
+            preso: p.preso || false,
+            localPrisao: p.preso ? p.localPrisao || '' : '',
+            observacoes: p.observacoes || ''
+          };
+          if (p.advogadoId && p.advogadoId > 0) {
+            parte.advogadoId = Number(p.advogadoId);
+            parte.tipoRepresentacao = p.tipoRepresentacao || 'DEFESA';
+          }
+          return parte;
+        });
+      await api.put(`/audiencias/${audienciaId}/participantes`, partesPayload);
 
-      navigate(rotaDeVolta);
+      voltar();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao salvar audiência. Por favor, tente novamente.');
       console.error('Erro ao salvar audiência:', err);
@@ -605,9 +620,30 @@ const FormAudiencia: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">
-        {isEdicao ? 'Editar Audiência' : 'Nova Audiência'}
-      </h1>
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+        <h1 className="text-2xl font-bold text-gray-800">
+          {isEdicao ? 'Editar Audiência' : 'Nova Audiência'}
+        </h1>
+        <div className="flex gap-2">
+          {pauta && (
+            <button
+              type="button"
+              onClick={() => navigate(`/pautas/${pauta.id}`)}
+              className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-2 px-4 rounded"
+              title="Abrir a pauta desta audiência"
+            >
+              Abrir Pauta
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={voltar}
+            className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded"
+          >
+            Voltar
+          </button>
+        </div>
+      </div>
 
       {/* Cabeçalho fixo da pauta: dados herdados, não editáveis aqui. */}
       {pauta && (
@@ -640,10 +676,10 @@ const FormAudiencia: React.FC = () => {
 
       <form onSubmit={handleSubmit} className="space-y-6 mb-4">
         {/* Seção 1: Processo e horário */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">Processo e Horário</legend>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Processo e Horário</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="col-span-2">
               <label className={LABEL} htmlFor="processo">Número do Processo (padrão CNJ)*</label>
               <input
                 className={INPUT}
@@ -657,12 +693,19 @@ const FormAudiencia: React.FC = () => {
                 onChange={handleChange}
                 required
               />
-              <p className="text-gray-500 text-xs mt-1">
-                Digite apenas os 20 números. Se o processo já teve audiência, o sistema
-                oferecerá copiar os dados dela (útil nas continuações).
-              </p>
             </div>
             <div>
+              <label className={LABEL} htmlFor="hora">Hora de início*</label>
+              <input className={INPUT} id="hora" name="hora" type="time"
+                     value={formData.hora} onChange={handleChange} required />
+            </div>
+            <div>
+              <label className={LABEL} htmlFor="duracao">Duração (min)*</label>
+              <input className={INPUT} id="duracao" name="duracao" type="number"
+                     min="15" max="480" step="15" placeholder="60"
+                     value={formData.duracao} onChange={handleChange} required />
+            </div>
+            <div className="col-span-2">
               <label className={LABEL} htmlFor="artigo">Artigo / Assunto</label>
               <input
                 className={INPUT}
@@ -675,23 +718,18 @@ const FormAudiencia: React.FC = () => {
                 onChange={handleChange}
               />
             </div>
-            <div>
-              <label className={LABEL} htmlFor="hora">Hora de início*</label>
-              <input className={INPUT} id="hora" name="hora" type="time"
-                     value={formData.hora} onChange={handleChange} required />
-            </div>
-            <div>
-              <label className={LABEL} htmlFor="duracao">Duração (minutos)*</label>
-              <input className={INPUT} id="duracao" name="duracao" type="number"
-                     min="15" max="480" step="15" placeholder="60"
-                     value={formData.duracao} onChange={handleChange} required />
+            <div className="col-span-2 flex items-end">
+              <p className="text-gray-500 text-xs">
+                Digite apenas os 20 números do processo. Se ele já teve audiência, o
+                sistema oferece copiar os dados dela (útil nas continuações).
+              </p>
             </div>
           </div>
         </fieldset>
 
         {/* Seção 2: Classificação */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">Classificação</legend>
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Classificação</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className={LABEL} htmlFor="tipoAudiencia">Tipo de Audiência*</label>
@@ -740,8 +778,8 @@ const FormAudiencia: React.FC = () => {
         </fieldset>
 
         {/* Seção 3: Peças do processo */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">Peças do Processo</legend>
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Peças do Processo</h2>
           <p className="text-gray-500 text-sm mb-4">
             Marque as peças presentes e anote a folha onde se encontram — elas saem na pauta em PDF.
           </p>
@@ -775,8 +813,8 @@ const FormAudiencia: React.FC = () => {
         </fieldset>
 
         {/* Seção 4: Características e observações */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">Características</legend>
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Características</h2>
           <div className="grid grid-cols-2 gap-4 mb-4">
             {([
               ['reconhecimento', 'Reconhecimento'],
@@ -814,11 +852,11 @@ const FormAudiencia: React.FC = () => {
           </div>
         </fieldset>
 
-        {/* Seção 5: Participantes */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">
-            Participantes {participantes.length > 0 && `(${participantes.length})`}
-          </legend>
+        {/* Seção 5: Partes */}
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">
+            Partes {participantes.length > 0 && `(${participantes.length})`}
+          </h2>
 
           {!participantes.some(p => PARTES_PRINCIPAIS.includes(p.tipo)) && (
             <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 px-4 py-2 rounded mb-4 text-sm">
@@ -829,7 +867,7 @@ const FormAudiencia: React.FC = () => {
 
           {/* Adicionar novo participante */}
           <div className="border border-blue-300 rounded p-4 mb-4 bg-blue-50">
-            <h4 className="text-md font-semibold text-gray-700 mb-4">Adicionar Participante</h4>
+            <h4 className="text-md font-semibold text-gray-700 mb-4">Adicionar Parte</h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="relative autocomplete">
@@ -1002,8 +1040,12 @@ const FormAudiencia: React.FC = () => {
             </div>
           </div>
 
-          {/* Lista de participantes adicionados */}
-          {participantes.map((participante, index) => (
+          {/* Lista de partes adicionadas, na ordem de exibição (réu, vítima,
+              testemunhas...) preservando o índice original para os handlers. */}
+          {participantes
+            .map((participante, index) => ({ participante, index }))
+            .sort((a, b) => ordemExibicaoParte(a.participante.tipo) - ordemExibicaoParte(b.participante.tipo))
+            .map(({ participante, index }) => (
             <div key={index} className={`border rounded p-4 mb-3 ${
               PARTES_PRINCIPAIS.includes(participante.tipo)
                 ? 'border-blue-400 bg-blue-50'
@@ -1121,8 +1163,8 @@ const FormAudiencia: React.FC = () => {
         </fieldset>
 
         {/* Seção 6: Agendamento no Teams (texto gerado automaticamente) */}
-        <fieldset className="bg-white shadow-md rounded px-8 pt-6 pb-6">
-          <legend className="text-lg font-bold text-gray-800 px-2">Agendamento Teams</legend>
+        <fieldset className="bg-white shadow-md rounded p-6">
+          <h2 className="text-lg font-bold text-gray-800 mb-4">Agendamento Teams</h2>
           <label htmlFor="agendamentoTeams"
                  className="flex items-center text-gray-700 text-sm font-bold cursor-pointer">
             <input
@@ -1164,7 +1206,7 @@ const FormAudiencia: React.FC = () => {
           <button
             className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
             type="button"
-            onClick={() => navigate(rotaDeVolta)}
+            onClick={voltar}
           >
             Cancelar
           </button>

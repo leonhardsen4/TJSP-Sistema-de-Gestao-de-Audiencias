@@ -1,6 +1,9 @@
 package br.jus.tjsp.audiencias;
 
 import br.jus.tjsp.audiencias.config.Database;
+import br.jus.tjsp.audiencias.service.AudienciaService;
+import br.jus.tjsp.audiencias.service.BackupService;
+import br.jus.tjsp.audiencias.service.ExportacaoService;
 import br.jus.tjsp.audiencias.service.UsuarioService;
 import br.jus.tjsp.audiencias.web.Routes;
 import io.javalin.Javalin;
@@ -10,6 +13,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Ponto de entrada do Sistema de Gestão de Audiências do TJSP.
@@ -47,6 +53,32 @@ public final class AudienciasApplication {
         Javalin app = criarApp();
         app.start("0.0.0.0", porta);
         log.info("Sistema de Gestão de Audiências no ar em http://localhost:{}", porta);
+        iniciarBackupSemanal();
+    }
+
+    /**
+     * Agenda o backup automático semanal (CSV + cópia do banco na pasta
+     * {@code backups/}). O primeiro roda alguns minutos após a subida do
+     * servidor e, daí em diante, a cada 7 dias enquanto ele ficar no ar. O
+     * backup manual continua disponível na tela de Configurações a qualquer
+     * momento. A thread é daemon para não impedir o encerramento da JVM.
+     */
+    private static void iniciarBackupSemanal() {
+        BackupService backup = new BackupService(
+                new AudienciaService(), new ExportacaoService(), "backups");
+        ScheduledExecutorService agendador = Executors.newSingleThreadScheduledExecutor(tarefa -> {
+            Thread t = new Thread(tarefa, "backup-semanal");
+            t.setDaemon(true);
+            return t;
+        });
+        agendador.scheduleAtFixedRate(() -> {
+            try {
+                backup.executar();
+                log.info("Backup automático semanal concluído.");
+            } catch (Exception e) {
+                log.error("Falha no backup automático: {}", e.getMessage(), e);
+            }
+        }, 5, TimeUnit.DAYS.toMinutes(7), TimeUnit.MINUTES);
     }
 
     /**

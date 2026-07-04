@@ -19,3 +19,6 @@ data/*.trace.db
 
 # Sistema
 .DS_Store
+
+# Backups gerados em runtime
+backups/

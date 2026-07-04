@@ -1,12 +1,13 @@
 import axios from 'axios';
 
 // Criar instância do axios com configuração personalizada.
-// Em produção a API é servida pela mesma origem do frontend (Javalin),
-// então a baseURL fica vazia (URLs relativas) — funciona em qualquer
-// máquina da rede. Em desenvolvimento, .env.development aponta para
-// http://localhost:8080.
+// A API vive sob o prefixo "/api" (separada do SPA, que ocupa os demais
+// caminhos). Em produção, o Javalin serve ambos na mesma origem, então a
+// URL fica relativa ("/api/...") e funciona em qualquer máquina da rede;
+// em desenvolvimento, o proxy (setupProxy.js) encaminha "/api" ao backend.
+// REACT_APP_API_URL só é usada se for preciso apontar para outra origem.
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL ?? '',
+  baseURL: (process.env.REACT_APP_API_URL ?? '') + '/api',
   timeout: 10000,
 });
 

@@ -62,7 +62,7 @@ const AlterarSenhaForm = ({ usuario, onSenhaAlterada, onCancelar }) => {
         setSucesso('');
 
         try {
-            const response = await fetch(`http://localhost:8080/api/usuarios/${usuario.id}/alterar-senha`, {
+            const response = await fetch(`/api/usuarios/${usuario.id}/alterar-senha`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

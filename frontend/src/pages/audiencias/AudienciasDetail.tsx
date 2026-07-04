@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Calendar, Clock, MapPin, User, FileText, Users } from 'lucide-react';
 import { Badge } from '../../components/ui/badge';
 import api from '../../services/api';
-import { rotuloTipoParticipacao } from '../../utils/participacao';
+import { rotuloTipoParticipacao, ordemExibicaoParte } from '../../utils/participacao';
+import { rotuloStatus, rotuloTipo, rotuloCompetencia } from './AudienciasList';
 
 interface Audiencia {
   id: number;
@@ -17,7 +18,18 @@ interface Audiencia {
   formato: string;
   competencia: string;
   status: string;
+  artigo?: string;
   observacoes?: string;
+  reuPreso: boolean;
+  agendamentoTeams: boolean;
+  reconhecimento: boolean;
+  depoimentoEspecial: boolean;
+  defesaPrevia?: boolean;
+  defesaPreviaFolha?: string;
+  faCdc?: boolean;
+  faCdcFolha?: string;
+  laudo?: boolean;
+  laudoFolha?: string;
   vara?: {
     id: number;
     nome: string;
@@ -43,6 +55,8 @@ interface Participante {
   intimado: boolean;
   statusMandado?: string;
   folhaIntimacao?: string;
+  preso?: boolean;
+  localPrisao?: string;
   observacoes?: string;
   representacao?: {
     tipo: string;
@@ -61,6 +75,17 @@ const statusMandadoInfo: Record<string, { rotulo: string; classe: string }> = {
 const AudienciasDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /**
+   * Volta para a tela anterior (a lista de audiências, o calendário ou a
+   * pauta de onde se veio), preservando os filtros já aplicados. Se a tela
+   * foi aberta por link direto (sem histórico), cai na lista de audiências.
+   */
+  const voltar = () => {
+    if (location.key !== 'default') navigate(-1);
+    else navigate('/audiencias');
+  };
   const [audiencia, setAudiencia] = useState<Audiencia | null>(null);
   const [participantes, setParticipantes] = useState<Participante[]>([]);
   const [loading, setLoading] = useState(true);
@@ -159,7 +184,12 @@ const AudienciasDetail: React.FC = () => {
       <div className="bg-white shadow-lg rounded-lg overflow-hidden">
         <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
           <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">Detalhes da Audiência</h1>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Detalhes da Audiência</h1>
+              <p className="text-2xl font-bold text-blue-900 mt-1 tracking-wide">
+                {audiencia.numeroProcesso}
+              </p>
+            </div>
             <div className="flex space-x-2">
               {audiencia.pautaId && (
                 <Link
@@ -182,12 +212,12 @@ const AudienciasDetail: React.FC = () => {
               >
                 Excluir
               </button>
-              <Link
-                to="/audiencias"
+              <button
+                onClick={voltar}
                 className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
               >
                 Voltar
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -195,12 +225,6 @@ const AudienciasDetail: React.FC = () => {
         <div className="px-6 py-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div className="flex items-center space-x-2">
-                <FileText className="h-5 w-5 text-gray-500" />
-                <span className="font-medium">Processo:</span>
-                <span>{audiencia.numeroProcesso}</span>
-              </div>
-              
               <div className="flex items-center space-x-2">
                 <Calendar className="h-5 w-5 text-gray-500" />
                 <span className="font-medium">Data:</span>
@@ -228,7 +252,7 @@ const AudienciasDetail: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <span className="font-medium">Status:</span>
                 <Badge className={getStatusBadgeClass(audiencia.status)}>
-                  {audiencia.status}
+                  {rotuloStatus[audiencia.status] || audiencia.status}
                 </Badge>
               </div>
             </div>
@@ -254,28 +278,81 @@ const AudienciasDetail: React.FC = () => {
 
               <div className="flex items-center space-x-2">
                 <span className="font-medium">Tipo:</span>
-                <span>{audiencia.tipoAudiencia}</span>
+                <span>{rotuloTipo[audiencia.tipoAudiencia] || audiencia.tipoAudiencia}</span>
               </div>
 
               <div className="flex items-center space-x-2">
                 <span className="font-medium">Competência:</span>
-                <span>{audiencia.competencia}</span>
+                <span>{rotuloCompetencia[audiencia.competencia] || audiencia.competencia}</span>
               </div>
+
+              {audiencia.artigo && (
+                <div className="flex items-center space-x-2">
+                  <FileText className="h-5 w-5 text-gray-500" />
+                  <span className="font-medium">Artigo:</span>
+                  <span>{audiencia.artigo}</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Participantes Section */}
+          {/* Marcadores da audiência: réu preso, depoimento especial, etc. */}
+          {(audiencia.reuPreso || audiencia.depoimentoEspecial
+            || audiencia.reconhecimento || audiencia.agendamentoTeams) && (
+            <div className="mt-6 flex flex-wrap gap-2">
+              {audiencia.reuPreso && (
+                <span className="inline-flex items-center rounded-full text-sm font-semibold px-3 py-1 bg-red-600 text-white">RÉU PRESO</span>
+              )}
+              {audiencia.depoimentoEspecial && (
+                <span className="inline-flex items-center rounded-full text-sm font-semibold px-3 py-1 bg-purple-700 text-white">DEPOIMENTO ESPECIAL</span>
+              )}
+              {audiencia.reconhecimento && (
+                <span className="inline-flex items-center rounded-full text-sm font-semibold px-3 py-1 bg-amber-500 text-white">RECONHECIMENTO</span>
+              )}
+              {audiencia.agendamentoTeams && (
+                <span className="inline-flex items-center rounded-full text-sm font-semibold px-3 py-1 bg-cyan-700 text-white">AGENDAMENTO TEAMS</span>
+              )}
+            </div>
+          )}
+
+          {/* Peças processuais juntadas (com a folha, quando informada) */}
+          {(audiencia.defesaPrevia || audiencia.faCdc || audiencia.laudo) && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Peças</h3>
+              <div className="flex flex-wrap gap-2">
+                {audiencia.defesaPrevia && (
+                  <Badge className="bg-slate-100 text-slate-800 text-sm">
+                    Defesa prévia{audiencia.defesaPreviaFolha ? ` (fls. ${audiencia.defesaPreviaFolha})` : ''}
+                  </Badge>
+                )}
+                {audiencia.faCdc && (
+                  <Badge className="bg-slate-100 text-slate-800 text-sm">
+                    FA/CDC{audiencia.faCdcFolha ? ` (fls. ${audiencia.faCdcFolha})` : ''}
+                  </Badge>
+                )}
+                {audiencia.laudo && (
+                  <Badge className="bg-slate-100 text-slate-800 text-sm">
+                    Laudo{audiencia.laudoFolha ? ` (fls. ${audiencia.laudoFolha})` : ''}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Partes da audiência (réus, vítimas, testemunhas...) */}
           <Card className="mt-6">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
                 <Users className="h-5 w-5" />
-                <span>Participantes</span>
+                <span>Partes</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
               {participantes.length > 0 ? (
                 <div className="space-y-3">
-                  {participantes.map((participante) => (
+                  {[...participantes]
+                    .sort((a, b) => ordemExibicaoParte(a.tipo) - ordemExibicaoParte(b.tipo))
+                    .map((participante) => (
                     <div key={participante.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <div className="flex items-center space-x-3">
                         <User className="h-4 w-4 text-gray-500" />
@@ -290,9 +367,17 @@ const AudienciasDetail: React.FC = () => {
                           {participante.folhaIntimacao && (
                             <div className="text-xs text-gray-500">Intimação às {participante.folhaIntimacao}</div>
                           )}
+                          {participante.preso && (
+                            <div className="text-xs text-red-700 font-medium">
+                              Preso{participante.localPrisao ? ` — ${participante.localPrisao}` : ''}
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
+                        {participante.preso && (
+                          <span className="inline-flex items-center rounded-full text-xs font-semibold px-2 py-0.5 bg-red-600 text-white">Preso</span>
+                        )}
                         {participante.intimado ? (
                           <Badge className="bg-green-100 text-green-800 text-xs">
                             Intimado
@@ -318,7 +403,7 @@ const AudienciasDetail: React.FC = () => {
                 </div>
               ) : (
                 <p className="text-gray-500 text-center py-4">
-                  Nenhum participante cadastrado para esta audiência.
+                  Nenhuma parte cadastrada para esta audiência.
                 </p>
               )}
             </CardContent>

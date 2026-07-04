@@ -33,8 +33,32 @@ public final class Database {
     /** Fonte de conexões SQLite configurada em {@link #init(String)}. */
     private static SQLiteDataSource dataSource;
 
+    /**
+     * Conexão da transação em andamento na thread atual, se houver.
+     * Enquanto estiver definida, {@link #query}, {@link #update} e
+     * {@link #insert} operam sobre ela (sem abrir nem fechar conexão),
+     * de modo que todos os comandos participem da mesma transação.
+     */
+    private static final ThreadLocal<Connection> TRANSACAO_ATUAL = new ThreadLocal<>();
+
     private Database() {
         // Classe utilitária: não instanciável.
+    }
+
+    /**
+     * Ação executada dentro de uma transação, produzindo um resultado.
+     *
+     * @param <T> tipo do resultado
+     */
+    @FunctionalInterface
+    public interface AcaoTransacional<T> {
+        /**
+         * Executa a ação. Qualquer exceção não verificada lançada aqui
+         * provoca o rollback da transação.
+         *
+         * @return resultado da ação
+         */
+        T executar();
     }
 
     /**
@@ -204,6 +228,76 @@ public final class Database {
     }
 
     /**
+     * Executa um bloco de comandos de banco dentro de uma única transação:
+     * ou tudo é confirmado ({@code commit}), ou nada é aplicado
+     * ({@code rollback}) caso alguma exceção seja lançada. Enquanto o bloco
+     * roda, as chamadas a {@link #query}, {@link #update} e {@link #insert}
+     * na mesma thread usam a conexão da transação automaticamente.
+     *
+     * <p>Reentrante: se já houver uma transação ativa na thread, o bloco
+     * apenas participa dela (não abre uma nova nem confirma sozinho).</p>
+     *
+     * @param acao bloco a executar; seu retorno é repassado ao chamador
+     * @param <T>  tipo do resultado
+     * @return o valor devolvido pela ação
+     */
+    public static <T> T executarEmTransacao(AcaoTransacional<T> acao) {
+        // Já dentro de uma transação nesta thread: apenas participa dela.
+        if (TRANSACAO_ATUAL.get() != null) {
+            return acao.executar();
+        }
+        if (dataSource == null) {
+            throw new IllegalStateException("Database.init() ainda não foi chamado");
+        }
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            TRANSACAO_ATUAL.set(conn);
+            try {
+                T resultado = acao.executar();
+                conn.commit();
+                return resultado;
+            } catch (RuntimeException | Error e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                TRANSACAO_ATUAL.remove();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro na transação: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Versão sem retorno de {@link #executarEmTransacao(AcaoTransacional)}.
+     *
+     * @param acao bloco a executar dentro da transação
+     */
+    public static void executarEmTransacao(Runnable acao) {
+        executarEmTransacao(() -> {
+            acao.run();
+            return null;
+        });
+    }
+
+    /**
+     * Gera uma cópia consistente do banco no caminho informado, usando
+     * {@code VACUUM INTO} do SQLite — seguro mesmo com o servidor no ar e o
+     * modo WAL ativo. Não pode rodar dentro de uma transação.
+     *
+     * @param caminhoDestino caminho do arquivo de destino (será criado)
+     */
+    public static void backupPara(String caminhoDestino) {
+        // O destino é gerado pelo servidor (pasta de backup + carimbo), sem
+        // entrada do usuário; ainda assim, dobramos aspas simples por garantia.
+        String destino = caminhoDestino.replace("'", "''");
+        try (Connection conn = getConnection(); Statement st = conn.createStatement()) {
+            st.execute("VACUUM INTO '" + destino + "'");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro ao gerar cópia do banco: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Executa uma consulta e mapeia todas as linhas do resultado.
      *
      * @param sql    comando SQL com marcadores {@code ?}
@@ -213,9 +307,24 @@ public final class Database {
      * @return lista (possivelmente vazia) com as linhas mapeadas
      */
     public static <T> List<T> query(String sql, RowMapper<T> mapper, Object... params) {
+        Connection tx = TRANSACAO_ATUAL.get();
+        if (tx != null) {
+            return consultarEm(tx, sql, mapper, params);
+        }
+        try (Connection conn = getConnection()) {
+            return consultarEm(conn, sql, mapper, params);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro na consulta SQL: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa a consulta em uma conexão específica (sem fechá-la), usada
+     * tanto no caminho comum quanto dentro de uma transação.
+     */
+    private static <T> List<T> consultarEm(Connection conn, String sql, RowMapper<T> mapper, Object... params) {
         List<T> resultado = new ArrayList<>();
-        try (Connection conn = getConnection(); PreparedStatement st = preparar(conn, sql, params);
-             ResultSet rs = st.executeQuery()) {
+        try (PreparedStatement st = preparar(conn, sql, params); ResultSet rs = st.executeQuery()) {
             while (rs.next()) {
                 resultado.add(mapper.map(rs));
             }
@@ -247,6 +356,14 @@ public final class Database {
      * @return quantidade de linhas afetadas
      */
     public static int update(String sql, Object... params) {
+        Connection tx = TRANSACAO_ATUAL.get();
+        if (tx != null) {
+            try (PreparedStatement st = preparar(tx, sql, params)) {
+                return st.executeUpdate();
+            } catch (SQLException e) {
+                throw new IllegalStateException("Erro no comando SQL: " + e.getMessage(), e);
+            }
+        }
         try (Connection conn = getConnection(); PreparedStatement st = preparar(conn, sql, params)) {
             return st.executeUpdate();
         } catch (SQLException e) {
@@ -262,8 +379,23 @@ public final class Database {
      * @return id gerado pelo banco para a nova linha
      */
     public static long insert(String sql, Object... params) {
-        try (Connection conn = getConnection();
-             PreparedStatement st = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        Connection tx = TRANSACAO_ATUAL.get();
+        if (tx != null) {
+            return inserirEm(tx, sql, params);
+        }
+        try (Connection conn = getConnection()) {
+            return inserirEm(conn, sql, params);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Erro no INSERT: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Executa o INSERT em uma conexão específica (sem fechá-la) e devolve a
+     * chave gerada, usado tanto no caminho comum quanto dentro de transação.
+     */
+    private static long inserirEm(Connection conn, String sql, Object... params) {
+        try (PreparedStatement st = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             aplicarParametros(st, params);
             st.executeUpdate();
             try (ResultSet chaves = st.getGeneratedKeys()) {

@@ -3,6 +3,7 @@ package br.jus.tjsp.audiencias.web;
 import br.jus.tjsp.audiencias.dao.CrudDao;
 import br.jus.tjsp.audiencias.service.AudienciaService;
 import br.jus.tjsp.audiencias.service.EstatisticasService;
+import br.jus.tjsp.audiencias.service.BackupService;
 import br.jus.tjsp.audiencias.service.ExportacaoService;
 import br.jus.tjsp.audiencias.service.MandadoService;
 import br.jus.tjsp.audiencias.service.ParticipacaoService;
@@ -22,10 +23,11 @@ import java.util.Map;
 /**
  * Registro de todas as rotas HTTP da API.
  *
- * <p>Cada grupo de rotas é registrado duas vezes: sem prefixo e com o
- * prefixo {@code /api}, porque o frontend usa as duas formas em telas
- * diferentes. O tratamento de erros devolve o mesmo formato JSON do
- * antigo GlobalExceptionHandler do Spring.</p>
+ * <p>Toda a API é registrada sob o prefixo {@code /api}. Os demais caminhos
+ * ficam reservados ao SPA (servido pelo {@code spaRoot}), para que abrir ou
+ * recarregar uma página do frontend (ex.: {@code /pautas/8}) no navegador não
+ * colida com uma rota de API de mesmo caminho. O tratamento de erros devolve
+ * o mesmo formato JSON do antigo GlobalExceptionHandler do Spring.</p>
  */
 public final class Routes {
 
@@ -68,8 +70,12 @@ public final class Routes {
         MandadoService mandados = new MandadoService();
         PendenciaService pendencias = new PendenciaService();
         ExportacaoService exportacao = new ExportacaoService();
+        BackupService backup = new BackupService(audiencias, exportacao, "backups");
 
-        for (String prefixo : new String[]{"", "/api"}) {
+        // A API vive somente sob "/api". Todos os demais caminhos ficam livres
+        // para o SPA (index.html via spaRoot), de modo que recarregar/abrir
+        // direto uma página como /pautas/8 no navegador não colida com a API.
+        for (String prefixo : new String[]{"/api"}) {
             registrarCrud(app, prefixo + "/varas", VARAS);
             registrarCrud(app, prefixo + "/juizes", JUIZES);
             registrarCrud(app, prefixo + "/promotores", PROMOTORES);
@@ -82,6 +88,10 @@ public final class Routes {
             registrarMandadosEPendencias(app, prefixo, mandados, pendencias);
 
             app.get(prefixo + "/estatisticas/dashboard", ctx -> ctx.json(estatisticas.resumoDashboard()));
+
+            // Backup: consulta a situação da pasta e dispara um backup manual.
+            app.get(prefixo + "/backup", ctx -> ctx.json(backup.status()));
+            app.post(prefixo + "/backup", ctx -> ctx.json(backup.executar()));
 
             app.get(prefixo + "/pauta/pdf", ctx -> {
                 byte[] pdf;
@@ -214,6 +224,9 @@ public final class Routes {
         app.get(base + "/{id}/participantes", ctx -> ctx.json(participacoes.listar(idDaRota(ctx))));
         app.post(base + "/{id}/participantes",
                 ctx -> ctx.status(201).json(participacoes.adicionar(idDaRota(ctx), corpo(ctx))));
+        // Substitui toda a relação de partes de uma vez, em transação única.
+        app.put(base + "/{id}/participantes",
+                ctx -> ctx.json(participacoes.substituir(idDaRota(ctx), corpoLista(ctx))));
         app.delete(base + "/{id}/participantes", ctx -> {
             participacoes.removerTodos(idDaRota(ctx));
             ctx.status(204);
@@ -303,6 +316,7 @@ public final class Routes {
             usuarios.alterarSenha(idDaRota(ctx), texto(corpo, "senhaAtual"), texto(corpo, "novaSenha"));
             ctx.json(Map.of("mensagem", "Senha alterada com sucesso"));
         });
+        app.put(base + "/{id}/perfil", ctx -> ctx.json(usuarios.atualizarPerfil(idDaRota(ctx), corpo(ctx))));
         app.get(base + "/{id}", ctx -> ctx.json(usuarios.buscarPorId(idDaRota(ctx))));
     }
 
@@ -369,6 +383,20 @@ public final class Routes {
             return Map.of();
         }
         return ctx.bodyAsClass(Map.class);
+    }
+
+    /**
+     * Lê o corpo JSON da requisição como lista de mapas.
+     *
+     * @param ctx contexto da requisição
+     * @return corpo desserializado (lista vazia se não houver corpo)
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> corpoLista(Context ctx) {
+        if (ctx.body().isBlank()) {
+            return List.of();
+        }
+        return ctx.bodyAsClass(List.class);
     }
 
     /**

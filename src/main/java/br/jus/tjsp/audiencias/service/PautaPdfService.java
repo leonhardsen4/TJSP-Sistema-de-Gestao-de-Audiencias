@@ -1,7 +1,9 @@
 package br.jus.tjsp.audiencias.service;
 
 import br.jus.tjsp.audiencias.config.Database;
+import br.jus.tjsp.audiencias.model.enums.Competencia;
 import br.jus.tjsp.audiencias.model.enums.StatusMandado;
+import br.jus.tjsp.audiencias.model.enums.TipoAudiencia;
 import br.jus.tjsp.audiencias.model.enums.TipoParticipacao;
 import com.lowagie.text.Chunk;
 import com.lowagie.text.Document;
@@ -90,32 +92,32 @@ public class PautaPdfService {
         PdfWriter.getInstance(documento, saida);
         documento.open();
 
-        Paragraph titulo = new Paragraph("TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO",
-                new Font(Font.HELVETICA, 16, Font.BOLD));
-        titulo.setAlignment(Element.ALIGN_CENTER);
-        documento.add(titulo);
-
-        Paragraph comarca = new Paragraph("Comarca de Cotia", new Font(Font.HELVETICA, 11, Font.NORMAL));
-        comarca.setAlignment(Element.ALIGN_CENTER);
-        documento.add(comarca);
+        CabecalhoPdf.adicionar(documento);
 
         LocalDate data = LocalDate.parse(String.valueOf(pauta.get("data")));
-        Paragraph subtitulo = new Paragraph("PAUTA DE AUDIÊNCIAS — " + data.format(FORMATO_BR),
-                new Font(Font.HELVETICA, 14, Font.BOLD));
+        Paragraph subtitulo = new Paragraph("PAUTA DE AUDIÊNCIAS",
+                new Font(Font.TIMES_ROMAN, 15, Font.BOLD, CabecalhoPdf.AZUL_TJ));
         subtitulo.setAlignment(Element.ALIGN_CENTER);
-        subtitulo.setSpacingBefore(8);
+        subtitulo.setSpacingBefore(10);
         documento.add(subtitulo);
 
-        // Cabeçalho único da pauta: vara, juiz e promotor valem para todas
-        // as audiências (vínculo rígido).
+        Paragraph dataPauta = new Paragraph(data.format(FORMATO_BR),
+                new Font(Font.TIMES_ROMAN, 12, Font.BOLD, Color.DARK_GRAY));
+        dataPauta.setAlignment(Element.ALIGN_CENTER);
+        dataPauta.setSpacingAfter(2);
+        documento.add(dataPauta);
+
+        // Cabeçalho único da pauta (fonte média): vara, juiz e promotor valem
+        // para todas as audiências (vínculo rígido).
         PdfPTable cabecalho = new PdfPTable(1);
         cabecalho.setWidthPercentage(100);
         cabecalho.setSpacingBefore(10);
         PdfPCell celulaCabecalho = new PdfPCell();
         celulaCabecalho.setBackgroundColor(COR_CABECALHO);
-        celulaCabecalho.setPadding(8);
-        Font fonteRotulo = new Font(Font.HELVETICA, 10, Font.BOLD);
-        Font fonteValor = new Font(Font.HELVETICA, 10, Font.NORMAL);
+        celulaCabecalho.setBorderColor(new Color(200, 208, 220));
+        celulaCabecalho.setPadding(10);
+        Font fonteRotulo = new Font(Font.HELVETICA, 11, Font.BOLD);
+        Font fonteValor = new Font(Font.HELVETICA, 11, Font.NORMAL);
         celulaCabecalho.addElement(linhaRotulos(fonteRotulo, fonteValor,
                 "Vara: ", nomeAninhado(pauta, "vara"),
                 "Juiz: ", nomeAninhado(pauta, "juiz"),
@@ -172,22 +174,22 @@ public class PautaPdfService {
         celula.setPadding(8);
         celula.setBackgroundColor(COR_BLOCO);
 
-        Font fonteCabecalho = new Font(Font.HELVETICA, 12, Font.BOLD);
         Font fonteRotulo = new Font(Font.HELVETICA, 9, Font.BOLD);
         Font fonteValor = new Font(Font.HELVETICA, 9, Font.NORMAL);
 
+        // Cabeçalho do processo: horário de início e o número do processo em
+        // destaque (o elemento de identificação da audiência na pauta).
         Paragraph cabecalho = new Paragraph();
-        cabecalho.add(new Chunk(valor(audiencia, "horarioInicio") + " - " + valor(audiencia, "horarioFim"),
+        cabecalho.add(new Chunk(valor(audiencia, "horarioInicio") + "h   ",
                 new Font(Font.HELVETICA, 12, Font.BOLD, new Color(0, 60, 130))));
-        cabecalho.add(new Chunk("      PROCESSO " + valor(audiencia, "numeroProcesso"), fonteCabecalho));
-        cabecalho.setSpacingAfter(5);
+        cabecalho.add(new Chunk("PROCESSO Nº " + valor(audiencia, "numeroProcesso"),
+                new Font(Font.HELVETICA, 14, Font.BOLD, CabecalhoPdf.AZUL_TJ)));
+        cabecalho.setSpacingAfter(6);
         celula.addElement(cabecalho);
 
         celula.addElement(linhaRotulos(fonteRotulo, fonteValor,
-                "Tipo: ", legivel(valor(audiencia, "tipoAudiencia")),
-                "Formato: ", legivel(valor(audiencia, "formato")),
-                "Competência: ", legivel(valor(audiencia, "competencia")),
-                "Status: ", legivel(valor(audiencia, "status"))));
+                "Tipo: ", descricaoTipo(valor(audiencia, "tipoAudiencia")),
+                "Competência: ", descricaoCompetencia(valor(audiencia, "competencia"))));
 
         adicionarLinhaPecas(celula, audiencia, fonteRotulo, fonteValor);
 
@@ -285,18 +287,12 @@ public class PautaPdfService {
      */
     private void adicionarCabecalho(Document documento, String competencia, String varaId, String dataInicio,
                                     String dataFim, String status, String tipoAudiencia, String texto, int total) {
-        Paragraph titulo = new Paragraph("TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO",
-                new Font(Font.HELVETICA, 16, Font.BOLD));
-        titulo.setAlignment(Element.ALIGN_CENTER);
-        documento.add(titulo);
+        CabecalhoPdf.adicionar(documento);
 
-        Paragraph comarca = new Paragraph("Comarca de Cotia", new Font(Font.HELVETICA, 11, Font.NORMAL));
-        comarca.setAlignment(Element.ALIGN_CENTER);
-        documento.add(comarca);
-
-        Paragraph subtitulo = new Paragraph("PAUTA DE AUDIÊNCIAS", new Font(Font.HELVETICA, 14, Font.BOLD));
+        Paragraph subtitulo = new Paragraph("PAUTA DE AUDIÊNCIAS",
+                new Font(Font.TIMES_ROMAN, 15, Font.BOLD, CabecalhoPdf.AZUL_TJ));
         subtitulo.setAlignment(Element.ALIGN_CENTER);
-        subtitulo.setSpacingBefore(8);
+        subtitulo.setSpacingBefore(10);
         documento.add(subtitulo);
 
         List<String> filtros = new ArrayList<>();
@@ -374,22 +370,22 @@ public class PautaPdfService {
         celula.setPadding(8);
         celula.setBackgroundColor(COR_BLOCO);
 
-        Font fonteCabecalho = new Font(Font.HELVETICA, 12, Font.BOLD);
         Font fonteRotulo = new Font(Font.HELVETICA, 9, Font.BOLD);
         Font fonteValor = new Font(Font.HELVETICA, 9, Font.NORMAL);
 
+        // Cabeçalho do processo: horário de início e o número do processo em
+        // destaque (o elemento de identificação da audiência).
         Paragraph cabecalho = new Paragraph();
-        cabecalho.add(new Chunk("PROCESSO " + valor(audiencia, "numeroProcesso"), fonteCabecalho));
-        cabecalho.add(new Chunk("      " + valor(audiencia, "horarioInicio") + " - "
-                + valor(audiencia, "horarioFim"), new Font(Font.HELVETICA, 11, Font.BOLD, new Color(0, 60, 130))));
-        cabecalho.setSpacingAfter(5);
+        cabecalho.add(new Chunk(valor(audiencia, "horarioInicio") + "h   ",
+                new Font(Font.HELVETICA, 11, Font.BOLD, new Color(0, 60, 130))));
+        cabecalho.add(new Chunk("PROCESSO Nº " + valor(audiencia, "numeroProcesso"),
+                new Font(Font.HELVETICA, 14, Font.BOLD, CabecalhoPdf.AZUL_TJ)));
+        cabecalho.setSpacingAfter(6);
         celula.addElement(cabecalho);
 
         celula.addElement(linhaRotulos(fonteRotulo, fonteValor,
-                "Tipo: ", legivel(valor(audiencia, "tipoAudiencia")),
-                "Formato: ", legivel(valor(audiencia, "formato")),
-                "Competência: ", legivel(valor(audiencia, "competencia")),
-                "Status: ", legivel(valor(audiencia, "status"))));
+                "Tipo: ", descricaoTipo(valor(audiencia, "tipoAudiencia")),
+                "Competência: ", descricaoCompetencia(valor(audiencia, "competencia"))));
 
         celula.addElement(linhaRotulos(fonteRotulo, fonteValor,
                 "Vara: ", nomeAninhado(audiencia, "vara"),
@@ -510,20 +506,25 @@ public class PautaPdfService {
      * @return tabela pronta para inclusão no bloco, ou aviso se não houver participantes
      */
     private Element tabelaParticipantes(long audienciaId) {
-        List<Map<String, Object>> participantes = participacaoService.listar(audienciaId);
+        List<Map<String, Object>> participantes = new ArrayList<>(participacaoService.listar(audienciaId));
         if (participantes.isEmpty()) {
-            Paragraph nenhum = new Paragraph("Nenhum participante cadastrado.",
+            Paragraph nenhum = new Paragraph("Nenhuma parte cadastrada.",
                     new Font(Font.HELVETICA, 9, Font.ITALIC, new Color(160, 30, 30)));
             nenhum.setSpacingBefore(3);
             return nenhum;
         }
+        // Ordena as partes: réu, vítima e testemunhas (acusação, comum e
+        // defesa) primeiro; as demais na ordem de cadastro (sort estável).
+        participantes.sort((a, b) -> Integer.compare(
+                ordemParte(String.valueOf(a.get("tipo"))),
+                ordemParte(String.valueOf(b.get("tipo")))));
 
         PdfPTable tabela = new PdfPTable(new float[]{28, 15, 22, 9, 17, 9});
         tabela.setWidthPercentage(100);
         tabela.setSpacingBefore(4);
 
         Font fonteTitulo = new Font(Font.HELVETICA, 8, Font.BOLD);
-        for (String titulo : new String[]{"Participante", "Papel", "Advogado", "Intimado", "Mandado", "Fls."}) {
+        for (String titulo : new String[]{"Parte", "Papel", "Advogado", "Intimado", "Mandado", "Fls."}) {
             PdfPCell cabecalho = new PdfPCell(new Paragraph(titulo, fonteTitulo));
             cabecalho.setBackgroundColor(COR_CABECALHO);
             cabecalho.setPadding(4);
@@ -531,14 +532,23 @@ public class PautaPdfService {
         }
 
         Font fonteCelula = new Font(Font.HELVETICA, 8, Font.NORMAL);
+        Font fonteObs = new Font(Font.HELVETICA, 7, Font.ITALIC, Color.DARK_GRAY);
         for (Map<String, Object> p : participantes) {
-            // Participante preso: nome acompanhado do local de prisão.
-            String nome = nomeAninhado(p, "pessoa");
+            // Nome da parte, com o local de prisão (se presa) e a observação
+            // (se houver) logo abaixo, na mesma célula.
+            Paragraph nome = new Paragraph(nomeAninhado(p, "pessoa"), fonteCelula);
             if (Boolean.TRUE.equals(p.get("preso"))) {
                 Object local = p.get("localPrisao");
-                nome += "\nPRESO" + (local == null || local.toString().isBlank() ? "" : " - " + local);
+                nome.add(new Chunk("\nPRESO" + (local == null || local.toString().isBlank()
+                        ? "" : " - " + local), new Font(Font.HELVETICA, 7, Font.BOLD, new Color(160, 30, 30))));
             }
-            tabela.addCell(celulaTexto(nome, fonteCelula));
+            Object obs = p.get("observacoes");
+            if (obs != null && !obs.toString().isBlank()) {
+                nome.add(new Chunk("\nObs.: " + obs, fonteObs));
+            }
+            PdfPCell celulaNome = new PdfPCell(nome);
+            celulaNome.setPadding(3);
+            tabela.addCell(celulaNome);
             tabela.addCell(celulaTexto(descricaoTipoParticipacao(String.valueOf(p.get("tipo"))), fonteCelula));
             tabela.addCell(celulaTexto(descricaoAdvogado(p), fonteCelula));
             boolean intimado = Boolean.TRUE.equals(p.get("intimado"));
@@ -602,6 +612,26 @@ public class PautaPdfService {
     }
 
     /**
+     * Ordem de exibição das partes na pauta: réu, vítima e as testemunhas
+     * (acusação, comum e defesa) primeiro; as demais depois, na ordem de
+     * cadastro. Espelha a ordem usada nas telas do sistema.
+     */
+    private static final List<String> ORDEM_PARTES = List.of(
+            "REU", "VITIMA", "TESTEMUNHA_ACUSACAO", "TESTEMUNHA_COMUM", "TESTEMUNHA_DEFESA");
+
+    /**
+     * Peso de ordenação de um papel: índice fixo para os prioritários, valor
+     * alto para os demais (que assim mantêm a ordem de cadastro no sort estável).
+     *
+     * @param tipo nome do enum do papel
+     * @return peso para comparação (menor vem primeiro)
+     */
+    private static int ordemParte(String tipo) {
+        int indice = ORDEM_PARTES.indexOf(tipo);
+        return indice == -1 ? Integer.MAX_VALUE : indice;
+    }
+
+    /**
      * Descreve o período coberto pela pauta.
      *
      * @param dataInicio primeira data (opcional)
@@ -635,6 +665,36 @@ public class PautaPdfService {
     private static String nomeDaVara(String varaId) {
         return Database.queryOne("SELECT nome FROM vara WHERE id = ?",
                 rs -> rs.getString("nome"), Long.parseLong(varaId)).orElse("id " + varaId);
+    }
+
+    /**
+     * Rótulo oficial do tipo de audiência (com acentuação e pontuação),
+     * ex.: {@code Instrução, Debates e Julgamento}.
+     *
+     * @param codigo nome do enum {@code TipoAudiencia}
+     * @return descrição do enum, ou o texto legível como reserva
+     */
+    private static String descricaoTipo(String codigo) {
+        try {
+            return TipoAudiencia.valueOf(codigo).getDescricao();
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return legivel(codigo);
+        }
+    }
+
+    /**
+     * Rótulo oficial da competência (com acentuação), ex.: {@code Violência
+     * Doméstica}.
+     *
+     * @param codigo nome do enum {@code Competencia}
+     * @return descrição do enum, ou o texto legível como reserva
+     */
+    private static String descricaoCompetencia(String codigo) {
+        try {
+            return Competencia.valueOf(codigo).getDescricao();
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return legivel(codigo);
+        }
     }
 
     /**

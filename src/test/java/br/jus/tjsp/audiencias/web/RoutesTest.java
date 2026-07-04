@@ -12,28 +12,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Testes de fumaça das rotas HTTP: garantem que o contrato usado pelo
  * frontend (caminhos, códigos de status e formato das respostas) está
- * registrado corretamente, com e sem o prefixo {@code /api}.
+ * registrado corretamente sob o prefixo {@code /api}. Os demais caminhos
+ * pertencem ao SPA e não devem responder como API.
  */
 class RoutesTest extends TesteBase {
 
     /**
-     * O ciclo criar/listar de varas deve funcionar via HTTP, nos dois
-     * prefixos de rota.
+     * O ciclo criar/listar de varas deve funcionar via HTTP sob {@code /api},
+     * e o mesmo caminho sem o prefixo NÃO deve responder como API (fica
+     * reservado ao SPA, evitando colisão com as páginas do frontend).
      */
     @Test
-    void crudDeVarasDeveResponderNosDoisPrefixos() {
+    void crudDeVarasDeveResponderSomenteSobApi() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            var criacao = cliente.post("/varas", java.util.Map.of("nome", "1ª Vara"));
+            var criacao = cliente.post("/api/varas", java.util.Map.of("nome", "1ª Vara"));
             assertEquals(201, criacao.code());
 
             // Os textos são normalizados em MAIÚSCULAS na gravação.
-            var semPrefixo = cliente.get("/varas");
-            assertEquals(200, semPrefixo.code());
-            assertTrue(semPrefixo.body().string().contains("1ª VARA"));
-
             var comPrefixo = cliente.get("/api/varas");
             assertEquals(200, comPrefixo.code());
             assertTrue(comPrefixo.body().string().contains("1ª VARA"));
+
+            // O caminho sem /api não é mais uma rota de API: não devolve o JSON
+            // das varas (é território do SPA).
+            var semPrefixo = cliente.get("/varas");
+            assertTrue(semPrefixo.code() == 404
+                            || !semPrefixo.body().string().contains("1ª VARA"),
+                    "O caminho /varas (sem /api) não deve responder como API");
         });
     }
 
@@ -43,7 +48,7 @@ class RoutesTest extends TesteBase {
     @Test
     void validacaoDeveDevolver400ComErrors() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            var resposta = cliente.post("/varas", java.util.Map.of("comarca", "X"));
+            var resposta = cliente.post("/api/varas", java.util.Map.of("comarca", "X"));
             assertEquals(400, resposta.code());
             String corpo = resposta.body().string();
             assertTrue(corpo.contains("\"errors\""));
@@ -58,7 +63,7 @@ class RoutesTest extends TesteBase {
     @Test
     void idInexistenteDeveDevolver404() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            var resposta = cliente.get("/juizes/999");
+            var resposta = cliente.get("/api/juizes/999");
             assertEquals(404, resposta.code());
             assertTrue(resposta.body().string().contains("não encontrado"));
         });
@@ -73,18 +78,18 @@ class RoutesTest extends TesteBase {
     @Test
     void fluxoCompletoDePautaEAudienciaDeveFuncionar() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            cliente.post("/varas", java.util.Map.of("nome", "Vara"));
-            cliente.post("/juizes", java.util.Map.of("nome", "Juiz"));
-            cliente.post("/promotores", java.util.Map.of("nome", "Promotor"));
-            cliente.post("/pessoas", java.util.Map.of("nome", "Carlos"));
+            cliente.post("/api/varas", java.util.Map.of("nome", "Vara"));
+            cliente.post("/api/juizes", java.util.Map.of("nome", "Juiz"));
+            cliente.post("/api/promotores", java.util.Map.of("nome", "Promotor"));
+            cliente.post("/api/pessoas", java.util.Map.of("nome", "Carlos"));
 
             // Audiência avulsa não existe mais: nasce dentro da pauta.
-            var pauta = cliente.post("/pautas", java.util.Map.of(
+            var pauta = cliente.post("/api/pautas", java.util.Map.of(
                     "data", "2026-07-06", "varaId", 1, "juizId", 1, "promotorId", 1,
                     "observacoes", "pauta de instrução"));
             assertEquals(201, pauta.code());
 
-            var criacao = cliente.post("/pautas/1/audiencias", java.util.Map.of(
+            var criacao = cliente.post("/api/pautas/1/audiencias", java.util.Map.of(
                     "numeroProcesso", "1234567-89.2026.8.26.0001",
                     "horarioInicio", "10:00",
                     "duracao", 60,
@@ -99,7 +104,7 @@ class RoutesTest extends TesteBase {
             assertTrue(corpoAudiencia.contains("\"dataAudiencia\":\"2026-07-06\""));
             assertTrue(corpoAudiencia.contains("\"pautaId\":1"));
 
-            var daPauta = cliente.get("/pautas/1/audiencias");
+            var daPauta = cliente.get("/api/pautas/1/audiencias");
             assertEquals(200, daPauta.code());
             assertTrue(daPauta.body().string().contains("1234567-89.2026.8.26.0001"));
 
@@ -108,24 +113,24 @@ class RoutesTest extends TesteBase {
             assertEquals(200, conflito.code());
             assertTrue(conflito.body().string().contains("\"temConflito\":true"));
 
-            var participante = cliente.post("/audiencias/1/participantes",
+            var participante = cliente.post("/api/audiencias/1/participantes",
                     java.util.Map.of("pessoaId", 1, "tipo", "REU"));
             assertEquals(201, participante.code());
 
-            var pdfDaPauta = cliente.get("/pautas/1/pdf");
+            var pdfDaPauta = cliente.get("/api/pautas/1/pdf");
             assertEquals(200, pdfDaPauta.code());
             assertTrue(pdfDaPauta.header("Content-Type").contains("application/pdf"));
 
-            var limpeza = cliente.delete("/audiencias/1/participantes");
+            var limpeza = cliente.delete("/api/audiencias/1/participantes");
             assertEquals(204, limpeza.code());
 
-            var lista = cliente.get("/audiencias/1/participantes");
+            var lista = cliente.get("/api/audiencias/1/participantes");
             assertEquals("[]", lista.body().string());
 
             // Excluir a pauta leva junto as audiências (cascata).
-            var exclusao = cliente.delete("/pautas/1");
+            var exclusao = cliente.delete("/api/pautas/1");
             assertEquals(204, exclusao.code());
-            assertEquals(404, cliente.get("/audiencias/1").code());
+            assertEquals(404, cliente.get("/api/audiencias/1").code());
         });
     }
 
@@ -165,12 +170,12 @@ class RoutesTest extends TesteBase {
     @Test
     void pautaPdfDeveResponderComContentTypeDePdf() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            var resposta = cliente.get("/pauta/pdf?data=2026-07-06");
+            var resposta = cliente.get("/api/pauta/pdf?data=2026-07-06");
             assertEquals(200, resposta.code());
             assertNotNull(resposta.header("Content-Type"));
             assertTrue(resposta.header("Content-Type").contains("application/pdf"));
 
-            var comFiltros = cliente.get("/pauta/pdf?dataInicio=2026-07-01&dataFim=2026-07-31&status=DESIGNADA");
+            var comFiltros = cliente.get("/api/pauta/pdf?dataInicio=2026-07-01&dataFim=2026-07-31&status=DESIGNADA");
             assertEquals(200, comFiltros.code());
             assertTrue(comFiltros.header("Content-Type").contains("application/pdf"));
         });
@@ -184,13 +189,13 @@ class RoutesTest extends TesteBase {
     @Test
     void fluxoDeMandadosEPendenciasDeveFuncionar() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            cliente.post("/varas", java.util.Map.of("nome", "Vara"));
-            cliente.post("/juizes", java.util.Map.of("nome", "Juiz"));
-            cliente.post("/promotores", java.util.Map.of("nome", "Promotor"));
-            cliente.post("/pessoas", java.util.Map.of("nome", "Maria"));
-            cliente.post("/pautas", java.util.Map.of(
+            cliente.post("/api/varas", java.util.Map.of("nome", "Vara"));
+            cliente.post("/api/juizes", java.util.Map.of("nome", "Juiz"));
+            cliente.post("/api/promotores", java.util.Map.of("nome", "Promotor"));
+            cliente.post("/api/pessoas", java.util.Map.of("nome", "Maria"));
+            cliente.post("/api/pautas", java.util.Map.of(
                     "data", "2099-07-06", "varaId", 1, "juizId", 1, "promotorId", 1));
-            cliente.post("/pautas/1/audiencias", java.util.Map.of(
+            cliente.post("/api/pautas/1/audiencias", java.util.Map.of(
                     "numeroProcesso", "1234567-89.2026.8.26.0001",
                     "horarioInicio", "10:00",
                     "duracao", 60,
@@ -198,7 +203,7 @@ class RoutesTest extends TesteBase {
                     "tipoAudiencia", "JURI",
                     "competencia", "CRIMINAL",
                     "formato", "PRESENCIAL"));
-            cliente.post("/audiencias/1/participantes", java.util.Map.of(
+            cliente.post("/api/audiencias/1/participantes", java.util.Map.of(
                     "pessoaId", 1, "tipo", "REU", "folhaIntimacao", "fls. 10"));
 
             var mandados = cliente.get("/api/mandados?statusMandado=PENDENTE");
@@ -207,12 +212,12 @@ class RoutesTest extends TesteBase {
             assertTrue(corpoMandados.contains("\"statusMandado\":\"PENDENTE\""));
             assertTrue(corpoMandados.contains("fls. 10"));
 
-            var atualizacao = cliente.put("/mandados/1",
+            var atualizacao = cliente.put("/api/mandados/1",
                     java.util.Map.of("statusMandado", "POSITIVO", "intimado", true));
             assertEquals(200, atualizacao.code());
             assertTrue(atualizacao.body().string().contains("\"statusMandado\":\"POSITIVO\""));
 
-            var pendencias = cliente.get("/pendencias");
+            var pendencias = cliente.get("/api/pendencias");
             assertEquals(200, pendencias.code());
             String corpoPendencias = pendencias.body().string();
             assertTrue(corpoPendencias.contains("audienciasSemParte"));
@@ -227,7 +232,7 @@ class RoutesTest extends TesteBase {
     @Test
     void dashboardDeveTerTodosOsContadores() {
         JavalinTest.test(AudienciasApplication.criarApp(), (servidor, cliente) -> {
-            var resposta = cliente.get("/estatisticas/dashboard");
+            var resposta = cliente.get("/api/estatisticas/dashboard");
             assertEquals(200, resposta.code());
             String corpo = resposta.body().string();
             for (String campo : new String[]{"totalAudiencias", "audienciasHoje", "totalVaras",

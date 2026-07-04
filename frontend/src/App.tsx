@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
+import Configuracoes from './pages/Configuracoes';
 import AudienciasList from './pages/audiencias/AudienciasList';
 import AudienciasForm from './pages/audiencias/AudienciasForm';
 import AudienciasDetail from './pages/audiencias/AudienciasDetail';
@@ -65,6 +66,7 @@ function App() {
               <Route path="pessoas/novo" element={<PessoasForm />} />
               <Route path="pessoas/editar/:id" element={<PessoasForm />} />
               <Route path="pessoas/:id" element={<PessoasDetail />} />
+              <Route path="configuracoes" element={<Configuracoes />} />
             </Route>
           </Routes>
         </ProtectedRoute>

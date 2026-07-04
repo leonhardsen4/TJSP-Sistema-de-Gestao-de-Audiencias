@@ -79,14 +79,12 @@ public class ExportacaoService {
         PdfWriter.getInstance(documento, saida);
         documento.open();
 
-        Paragraph titulo = new Paragraph("TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO — Comarca de Cotia",
-                new Font(Font.HELVETICA, 13, Font.BOLD));
-        titulo.setAlignment(Element.ALIGN_CENTER);
-        documento.add(titulo);
+        CabecalhoPdf.adicionar(documento);
 
-        Paragraph subtitulo = new Paragraph("RELAÇÃO DE AUDIÊNCIAS", new Font(Font.HELVETICA, 11, Font.BOLD));
+        Paragraph subtitulo = new Paragraph("RELAÇÃO DE AUDIÊNCIAS",
+                new Font(Font.TIMES_ROMAN, 13, Font.BOLD, CabecalhoPdf.AZUL_TJ));
         subtitulo.setAlignment(Element.ALIGN_CENTER);
-        subtitulo.setSpacingBefore(4);
+        subtitulo.setSpacingBefore(8);
         documento.add(subtitulo);
 
         Paragraph resumo = new Paragraph(audiencias.size() + " audiência(s)   |   Gerada em "

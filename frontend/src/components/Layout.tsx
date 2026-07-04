@@ -15,7 +15,8 @@ import {
   BuildingOfficeIcon,
   ClockIcon,
   ClipboardDocumentCheckIcon,
-  QueueListIcon
+  QueueListIcon,
+  Cog6ToothIcon
 } from '@heroicons/react/24/outline';
 
 const Layout: React.FC = () => {
@@ -38,6 +39,7 @@ const Layout: React.FC = () => {
     { name: 'Promotores', href: '/promotores', icon: UserIcon },
     { name: 'Advogados', href: '/advogados', icon: BriefcaseIcon },
     { name: 'Pessoas', href: '/pessoas', icon: UserGroupIcon },
+    { name: 'Configurações', href: '/configuracoes', icon: Cog6ToothIcon },
   ];
 
   const isActive = (path: string) => {

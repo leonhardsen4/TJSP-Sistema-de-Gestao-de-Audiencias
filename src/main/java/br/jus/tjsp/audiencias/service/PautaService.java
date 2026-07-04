@@ -124,23 +124,27 @@ public class PautaService {
     public Map<String, Object> atualizar(long id, Map<String, Object> dados) {
         buscarPorId(id);
         Valores v = validar(dados);
-        Database.update("""
-                        UPDATE pauta SET data = ?, vara_id = ?, juiz_id = ?, promotor_id = ?,
-                            observacoes = ?, atualizacao = ?
-                        WHERE id = ?
-                        """,
-                v.data.toString(), v.varaId, v.juizId, v.promotorId, v.observacoes,
-                LocalDateTime.now().toString(), id);
-
-        // Propagação rígida: as audiências da pauta acompanham o cabeçalho.
         String diaSemana = v.data.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
-        Database.update("""
-                        UPDATE audiencia SET data_audiencia = ?, dia_semana = ?, vara_id = ?,
-                            juiz_id = ?, promotor_id = ?, atualizacao = ?
-                        WHERE pauta_id = ?
-                        """,
-                v.data.toString(), diaSemana, v.varaId, v.juizId, v.promotorId,
-                LocalDateTime.now().toString(), id);
+        // Atômico: o cabeçalho da pauta e a propagação para as audiências
+        // acontecem juntos, ou nenhum dos dois.
+        Database.executarEmTransacao(() -> {
+            Database.update("""
+                            UPDATE pauta SET data = ?, vara_id = ?, juiz_id = ?, promotor_id = ?,
+                                observacoes = ?, atualizacao = ?
+                            WHERE id = ?
+                            """,
+                    v.data.toString(), v.varaId, v.juizId, v.promotorId, v.observacoes,
+                    LocalDateTime.now().toString(), id);
+
+            // Propagação rígida: as audiências da pauta acompanham o cabeçalho.
+            Database.update("""
+                            UPDATE audiencia SET data_audiencia = ?, dia_semana = ?, vara_id = ?,
+                                juiz_id = ?, promotor_id = ?, atualizacao = ?
+                            WHERE pauta_id = ?
+                            """,
+                    v.data.toString(), diaSemana, v.varaId, v.juizId, v.promotorId,
+                    LocalDateTime.now().toString(), id);
+        });
         return buscarPorId(id);
     }
 
