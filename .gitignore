@@ -22,3 +22,6 @@ data/*.trace.db
 
 # Backups gerados em runtime
 backups/
+
+# Distribuição empacotada (JRE + zips grandes) — gerada por empacotar-distribuivel.sh
+dist/

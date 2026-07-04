@@ -89,19 +89,30 @@ public final class AudienciasApplication {
      * @return aplicação configurada, ainda não iniciada
      */
     public static Javalin criarApp() {
+        Path buildExterno = Path.of("frontend", "build");
+        boolean temBuildExterno = Files.isDirectory(buildExterno);
+        // No JAR empacotado, o frontend vai embutido no classpath em /public.
+        boolean temBuildEmbutido = !temBuildExterno
+                && AudienciasApplication.class.getResource("/public/index.html") != null;
+
         Javalin app = Javalin.create(config -> {
             config.showJavalinBanner = false;
             config.bundledPlugins.enableCors(cors -> cors.addRule(regra -> {
                 regra.anyHost();
             }));
-            Path build = Path.of("frontend", "build");
-            if (Files.isDirectory(build)) {
-                config.staticFiles.add(build.toString(), Location.EXTERNAL);
-                config.spaRoot.addFile("/", build.resolve("index.html").toString(), Location.EXTERNAL);
+            if (temBuildExterno) {
+                // Desenvolvimento: serve a build da pasta (permite recompilar o
+                // frontend sem reempacotar o back-end).
+                config.staticFiles.add(buildExterno.toString(), Location.EXTERNAL);
+                config.spaRoot.addFile("/", buildExterno.resolve("index.html").toString(), Location.EXTERNAL);
+            } else if (temBuildEmbutido) {
+                // Empacotado (arquivo único): serve o frontend embutido no JAR.
+                config.staticFiles.add("/public", Location.CLASSPATH);
+                config.spaRoot.addFile("/", "/public/index.html", Location.CLASSPATH);
             }
         });
         Routes.registrar(app);
-        if (!Files.isDirectory(Path.of("frontend", "build"))) {
+        if (!temBuildExterno && !temBuildEmbutido) {
             // Sem build do frontend, a raiz orienta o usuário em vez de dar 404.
             app.get("/", ctx -> ctx.json(java.util.Map.of(
                     "sistema", "TJSP - Sistema de Gestão de Audiências",

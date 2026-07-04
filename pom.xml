@@ -80,6 +80,32 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
+            <!-- Empacotamento em arquivo único: embute a build do frontend
+                 (frontend/build) dentro do JAR, em /public, para o servidor
+                 servi-la do classpath sem depender de pasta externa.
+                 Rode 'npm run build' no frontend antes de 'mvn package'. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>embutir-frontend</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/public</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/frontend/build</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Execução em desenvolvimento: mvn compile exec:java -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>

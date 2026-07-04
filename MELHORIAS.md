@@ -239,3 +239,26 @@ Ações efetivas desta sessão:
   uso de forma visual. Se preferir, ela pode ser removida do menu.
 - O backup do banco anterior à migração ficou em `/tmp/backup_tjsp_audiencias.db`
   (a migração só adiciona colunas; nada foi alterado ou removido).
+
+## Rodada de 04/07/2026 (robustez, distribuição e produção)
+- **Transações atômicas**: `Database.executarEmTransacao` (ThreadLocal, reentrante);
+  operações compostas (pauta, partes) agora "tudo ou nada". Novo `PUT
+  /audiencias/{id}/participantes` substitui as partes numa transação só.
+- **Configurações** (`/configuracoes`): editar nome/e-mail, trocar senha e **backup**
+  (CSV das audiências + cópia `.db` via `VACUUM INTO` na pasta `backups/`; automático
+  semanal + botão manual).
+- **PDFs oficiais**: brasão do TJSP + "TRIBUNAL DE JUSTIÇA DE SÃO PAULO / COMARCA DE
+  COTIA" (fonte serifada, filete azul) em todos os relatórios. Na pauta: nº do processo
+  em destaque, só horário de início, Tipo/Competência (sem Formato/Status), rótulos com
+  acento, partes ordenadas (réu, vítima, testemunhas...) e renomeadas para "Parte", com
+  observação/prisão abaixo do nome.
+- **Colisão SPA×API corrigida**: a API passou a viver **só sob `/api`**; os demais
+  caminhos ficam para o SPA. Antes, recarregar/abrir direto uma página (ex.:
+  `/pautas/8`) devolvia JSON no navegador. Frontend agora usa `baseURL=/api` e navegação
+  client-side; `fetch` com `localhost:8080` cravado viraram relativos.
+- **Limpeza**: removidos `PaginatedTable`, `SortableTable`, `utils/validation.ts` e
+  `CalendarioAudiencias` (órfãos).
+- **Distribuição autocontida** (ver `DISTRIBUICAO.md`): `mvn package` embute o frontend
+  no JAR (`/public`); `empacotar-distribuivel.sh` gera pacotes Windows/Linux **com um
+  Java 17 portátil embutido** — rodam sem instalar Java e sem admin. Necessário porque as
+  estações do TJSP têm no máximo JRE 1.8, incompatível com a stack (Java 17).
