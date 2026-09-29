@@ -11,10 +11,13 @@ const api = axios.create({
   timeout: 10000,
 });
 
+/** Registra cada chamada no console só em desenvolvimento (evita ruído em produção). */
+const LOG_DETALHADO = process.env.NODE_ENV === 'development';
+
 // Interceptor para requisições
 api.interceptors.request.use(
   (config) => {
-    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`);
+    if (LOG_DETALHADO) console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`);
     return config;
   },
   (error) => {
@@ -26,7 +29,7 @@ api.interceptors.request.use(
 // Interceptor para respostas
 api.interceptors.response.use(
   (response) => {
-    console.log(`[API Response] ${response.status} ${response.config.url}`);
+    if (LOG_DETALHADO) console.log(`[API Response] ${response.status} ${response.config.url}`);
     return response;
   },
   (error) => {

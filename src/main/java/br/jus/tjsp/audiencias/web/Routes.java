@@ -186,14 +186,6 @@ public final class Routes {
                 ctx.queryParam("audienciaId") == null || ctx.queryParam("audienciaId").isBlank()
                         ? null : Long.parseLong(ctx.queryParam("audienciaId")))));
 
-        app.get(base + "/buscar-horarios-livres", ctx -> ctx.json(audiencias.buscarHorariosLivres(
-                Long.parseLong(obrigatorio(ctx, "varaId")),
-                AudienciaService.parseData(obrigatorio(ctx, "dataInicio")),
-                AudienciaService.parseData(obrigatorio(ctx, "dataFim")),
-                Integer.parseInt(obrigatorio(ctx, "duracao")),
-                obrigatorio(ctx, "horarioInicioMinimo"),
-                obrigatorio(ctx, "horarioFimMaximo"))));
-
         // Exportações da lista (respeitam os mesmos filtros da listagem).
         app.get(base + "/exportar/csv", ctx -> {
             byte[] csv = exportacao.gerarCsv(audiencias.listar(ctx.queryParam("competencia"),

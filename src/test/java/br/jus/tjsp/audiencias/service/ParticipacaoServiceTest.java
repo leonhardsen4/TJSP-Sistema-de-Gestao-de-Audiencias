@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,17 +38,17 @@ class ParticipacaoServiceTest extends TesteBase {
     }
 
     /**
-     * Participante sem advogado deve ser criado com {@code representacao}
-     * nula.
+     * Participante sem advogado deve ser criado com a lista
+     * {@code representacoes} vazia.
      */
     @Test
-    void adicionarSemAdvogadoDeveTerRepresentacaoNula() {
+    void adicionarSemAdvogadoDeveTerRepresentacoesVazias() {
         Map<String, Object> criado = servico.adicionar(audienciaId,
                 Map.of("pessoaId", pessoaId, "tipo", "TESTEMUNHA_DEFESA", "intimado", true));
         assertEquals("TESTEMUNHA_DEFESA", criado.get("tipo"));
         assertEquals(true, criado.get("intimado"));
         assertEquals("Carlos", ((Map<?, ?>) criado.get("pessoa")).get("nome"));
-        assertNull(criado.get("representacao"));
+        assertTrue(((List<?>) criado.get("representacoes")).isEmpty());
     }
 
     /**
@@ -62,7 +61,7 @@ class ParticipacaoServiceTest extends TesteBase {
         Map<String, Object> criado = servico.adicionar(audienciaId, Map.of(
                 "pessoaId", pessoaId, "tipo", "REU",
                 "advogadoId", advogadoId, "tipoRepresentacao", "CONSTITUIDO"));
-        Map<?, ?> representacao = (Map<?, ?>) criado.get("representacao");
+        Map<?, ?> representacao = primeiraRepresentacao(criado);
         assertEquals("CONSTITUIDO", representacao.get("tipo"));
         assertEquals("Ana", ((Map<?, ?>) representacao.get("advogado")).get("nome"));
     }
@@ -75,7 +74,81 @@ class ParticipacaoServiceTest extends TesteBase {
         long advogadoId = criarAdvogado("Ana");
         Map<String, Object> criado = servico.adicionar(audienciaId,
                 Map.of("pessoaId", pessoaId, "tipo", "REU", "advogadoId", advogadoId));
-        assertEquals("DEFESA", ((Map<?, ?>) criado.get("representacao")).get("tipo"));
+        assertEquals("DEFESA", primeiraRepresentacao(criado).get("tipo"));
+    }
+
+    /**
+     * Uma parte pode ter vários advogados (lista {@code advogados}), cada um
+     * com seu tipo de representação e com telefone/e-mail na resposta; o
+     * mesmo advogado repetido é gravado uma só vez.
+     */
+    @Test
+    void adicionarComVariosAdvogadosDeveGravarTodos() {
+        long ana = criarAdvogado("Ana");
+        long bruno = criarAdvogado("Bruno");
+        Map<String, Object> criado = servico.adicionar(audienciaId, Map.of(
+                "pessoaId", pessoaId, "tipo", "REU",
+                "advogados", List.of(
+                        Map.of("advogadoId", ana, "tipoRepresentacao", "CONSTITUIDO"),
+                        Map.of("advogadoId", bruno, "tipoRepresentacao", "DATIVO"),
+                        Map.of("advogadoId", ana))));
+        List<?> representacoes = (List<?>) criado.get("representacoes");
+        assertEquals(2, representacoes.size());
+        Map<?, ?> segunda = (Map<?, ?>) representacoes.get(1);
+        assertEquals("DATIVO", segunda.get("tipo"));
+        Map<?, ?> advogado = (Map<?, ?>) segunda.get("advogado");
+        assertEquals("Bruno", advogado.get("nome"));
+        assertTrue(advogado.containsKey("telefone"));
+        assertTrue(advogado.containsKey("email"));
+        // A listagem não deve duplicar a parte por ter vários advogados.
+        assertEquals(1, servico.listar(audienciaId).size());
+    }
+
+    /**
+     * A mesma pessoa não pode ser incluída duas vezes na mesma audiência.
+     */
+    @Test
+    void pessoaRepetidaNaMesmaAudienciaDeveFalhar() {
+        servico.adicionar(audienciaId, Map.of("pessoaId", pessoaId, "tipo", "REU"));
+        ApiException erro = assertThrows(ApiException.class,
+                () -> servico.adicionar(audienciaId, Map.of("pessoaId", pessoaId, "tipo", "VITIMA")));
+        assertEquals(400, erro.getStatus());
+    }
+
+    /**
+     * A substituição atômica deve aceitar a lista com vários advogados e,
+     * se houver pessoa repetida, não alterar nada.
+     */
+    @Test
+    void substituirComPessoaRepetidaNaoDeveAlterarNada() {
+        servico.adicionar(audienciaId, Map.of("pessoaId", pessoaId, "tipo", "REU"));
+        long outra = criarPessoa("Beatriz");
+        assertThrows(ApiException.class, () -> servico.substituir(audienciaId, List.of(
+                Map.of("pessoaId", outra, "tipo", "VITIMA"),
+                Map.of("pessoaId", outra, "tipo", "TESTEMUNHA_DEFESA"))));
+        List<Map<String, Object>> partes = servico.listar(audienciaId);
+        assertEquals(1, partes.size());
+        assertEquals("Carlos", ((Map<?, ?>) partes.get(0).get("pessoa")).get("nome"));
+    }
+
+    /**
+     * Devolve a primeira representação de um participante.
+     *
+     * @param participante participante no formato da API
+     * @return primeira representação da lista
+     */
+    private static Map<?, ?> primeiraRepresentacao(Map<String, Object> participante) {
+        return (Map<?, ?>) ((List<?>) participante.get("representacoes")).get(0);
+    }
+
+    /**
+     * A situação "ofício de requisição" deve ser aceita e gravada.
+     */
+    @Test
+    void oficioDeRequisicaoDeveSerAceito() {
+        Map<String, Object> criado = servico.adicionar(audienciaId, Map.of(
+                "pessoaId", pessoaId, "tipo", "TESTEMUNHA_DEFESA", "statusMandado", "OFICIO_REQUISICAO"));
+        assertEquals("OFICIO_REQUISICAO", criado.get("statusMandado"));
     }
 
     /**

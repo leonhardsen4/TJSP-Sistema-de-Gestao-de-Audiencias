@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS participacao_audiencia (
     pessoa_id       INTEGER NOT NULL REFERENCES pessoa (id),
     tipo            TEXT NOT NULL,
     intimado        INTEGER NOT NULL DEFAULT 0,
-    -- Situação do mandado de intimação (enum StatusMandado: PENDENTE, POSITIVO, NEGATIVO, DISPENSADO)
+    -- Situação do mandado de intimação (enum StatusMandado: PENDENTE, POSITIVO, NEGATIVO, DISPENSADO, OFICIO_REQUISICAO)
     status_mandado  TEXT NOT NULL DEFAULT 'PENDENTE',
     -- Folha do processo onde consta a intimação/mandado
     folha_intimacao TEXT,

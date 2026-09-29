@@ -10,7 +10,6 @@ import br.jus.tjsp.audiencias.web.ApiException;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -24,7 +23,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Regras de negócio das audiências: validação, persistência, verificação
+ * consultiva de conflitos de horário.
  * consultiva de conflitos de horário e busca de horários livres.
  *
  * <p>As audiências são lidas com JOIN nas tabelas de vara, juiz e promotor
@@ -352,74 +351,6 @@ public class AudienciaService {
             }
         }
         return Map.of("temConflito", !conflitos.isEmpty(), "conflitos", conflitos);
-    }
-
-    /**
-     * Procura horários livres para agendamento em uma vara dentro de um
-     * período, pulando fins de semana e mantendo 30 minutos de intervalo
-     * de segurança entre audiências.
-     *
-     * @param varaId        vara desejada
-     * @param dataInicio    primeiro dia do período
-     * @param dataFim       último dia do período
-     * @param duracao       duração desejada em minutos
-     * @param horarioMinimo não sugerir horários antes deste ({@code HH:mm})
-     * @param horarioMaximo não sugerir términos depois deste ({@code HH:mm})
-     * @return lista de sugestões {@code {data, horarioInicio, horarioFim, duracao, varaId, diaSemana}}
-     */
-    public List<Map<String, Object>> buscarHorariosLivres(long varaId, LocalDate dataInicio, LocalDate dataFim,
-                                                          int duracao, String horarioMinimo, String horarioMaximo) {
-        LocalTime minimo = LocalTime.parse(horarioMinimo);
-        LocalTime maximo = LocalTime.parse(horarioMaximo);
-        int intervaloSeguranca = 30;
-        LocalDate hoje = LocalDate.now();
-        LocalTime agora = LocalTime.now();
-
-        List<Map<String, Object>> livres = new ArrayList<>();
-        for (LocalDate dia = dataInicio; !dia.isAfter(dataFim); dia = dia.plusDays(1)) {
-            if (dia.getDayOfWeek() == DayOfWeek.SATURDAY || dia.getDayOfWeek() == DayOfWeek.SUNDAY
-                    || dia.isBefore(hoje)) {
-                // Fins de semana e dias já passados não recebem sugestões.
-                continue;
-            }
-            List<LocalTime[]> ocupados = Database.query(
-                    "SELECT horario_inicio, duracao FROM audiencia " +
-                            "WHERE data_audiencia = ? AND vara_id = ? AND status != 'NAO_REALIZADA'",
-                    rs -> {
-                        LocalTime ini = LocalTime.parse(rs.getString("horario_inicio"));
-                        return new LocalTime[]{ini, ini.plusMinutes(rs.getInt("duracao"))};
-                    },
-                    dia.toString(), varaId);
-
-            for (LocalTime slot = minimo; !slot.plusMinutes(duracao).isAfter(maximo); slot = slot.plusMinutes(30)) {
-                if (dia.equals(hoje) && slot.isBefore(agora)) {
-                    // Não sugerir horários que já passaram no dia de hoje.
-                    continue;
-                }
-                LocalTime fimSlot = slot.plusMinutes(duracao);
-                boolean conflita = false;
-                for (LocalTime[] ocupado : ocupados) {
-                    // O slot é válido quando termina 30 min (intervalo de segurança)
-                    // antes da audiência ocupada OU começa 30 min depois dela.
-                    if (fimSlot.plusMinutes(intervaloSeguranca).isAfter(ocupado[0])
-                            && slot.isBefore(ocupado[1].plusMinutes(intervaloSeguranca))) {
-                        conflita = true;
-                        break;
-                    }
-                }
-                if (!conflita) {
-                    Map<String, Object> livre = new LinkedHashMap<>();
-                    livre.put("data", dia.toString());
-                    livre.put("horarioInicio", slot.format(FORMATO_HORA));
-                    livre.put("horarioFim", fimSlot.format(FORMATO_HORA));
-                    livre.put("duracao", duracao);
-                    livre.put("varaId", varaId);
-                    livre.put("diaSemana", dia.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR));
-                    livres.add(livre);
-                }
-            }
-        }
-        return livres;
     }
 
     /**

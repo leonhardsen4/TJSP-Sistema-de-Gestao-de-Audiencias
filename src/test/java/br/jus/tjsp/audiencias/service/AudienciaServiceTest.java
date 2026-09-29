@@ -9,13 +9,12 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Testes das regras de negócio de audiências: validação, campos
- * calculados, filtros, conflitos de horário e horários livres.
+ * calculados, filtros e conflitos de horário.
  */
 class AudienciaServiceTest extends TesteBase {
 
@@ -157,26 +156,6 @@ class AudienciaServiceTest extends TesteBase {
     }
 
     /**
-     * A busca de horários livres deve pular fins de semana e os horários
-     * ocupados (incluindo o intervalo de segurança de 30 minutos).
-     */
-    @Test
-    void horariosLivresDevePularFimDeSemanaEOcupados() {
-        long varaId = criarVara("Vara");
-        servico.criar(corpoAudiencia(varaId, "2026-07-06", "10:00")); // segunda, 10:00-11:00
-
-        // Sábado 04/07 e domingo 05/07 não devem aparecer
-        List<Map<String, Object>> livres = servico.buscarHorariosLivres(
-                varaId, LocalDate.parse("2026-07-04"), LocalDate.parse("2026-07-06"),
-                60, "10:00", "13:00");
-        assertFalse(livres.isEmpty());
-        assertTrue(livres.stream().allMatch(h -> h.get("data").equals("2026-07-06")));
-        // 10:00 ocupado; 11:00 e 11:30 bloqueados pelo intervalo de segurança
-        assertTrue(livres.stream().noneMatch(h -> h.get("horarioInicio").equals("10:00")));
-        assertTrue(livres.stream().anyMatch(h -> h.get("horarioInicio").equals("12:00")));
-    }
-
-    /**
      * Excluir a audiência deve levar junto participações e representações
      * (cascata do banco).
      */
@@ -230,40 +209,6 @@ class AudienciaServiceTest extends TesteBase {
     }
 
     /**
-     * O intervalo de segurança deve ser de exatos 30 minutos: um slot que
-     * começa 30 minutos após o fim da audiência ocupada é válido.
-     */
-    @Test
-    void horariosLivresDeveRespeitarIntervaloDeSegurancaExato() {
-        long varaId = criarVara("Vara");
-        servico.criar(corpoAudiencia(varaId, "2026-07-06", "10:00")); // 10:00-11:00
-
-        List<Map<String, Object>> livres = servico.buscarHorariosLivres(
-                varaId, LocalDate.parse("2026-07-06"), LocalDate.parse("2026-07-06"),
-                60, "08:00", "13:00");
-        // 11:30 = fim da ocupada (11:00) + 30 minutos: deve estar livre.
-        assertTrue(livres.stream().anyMatch(h -> h.get("horarioInicio").equals("11:30")));
-        // 08:30-09:30 termina exatamente 30 minutos antes das 10:00: deve estar livre.
-        assertTrue(livres.stream().anyMatch(h -> h.get("horarioInicio").equals("08:30")));
-        // 09:00-10:00 encosta na ocupada sem folga: deve estar bloqueado.
-        assertTrue(livres.stream().noneMatch(h -> h.get("horarioInicio").equals("09:00")));
-        // 11:00 encosta no fim da ocupada sem folga: deve estar bloqueado.
-        assertTrue(livres.stream().noneMatch(h -> h.get("horarioInicio").equals("11:00")));
-    }
-
-    /**
-     * Dias já passados não devem receber sugestões de horários livres.
-     */
-    @Test
-    void horariosLivresNaoDeveSugerirDiasPassados() {
-        long varaId = criarVara("Vara");
-        List<Map<String, Object>> livres = servico.buscarHorariosLivres(
-                varaId, LocalDate.now().minusDays(7), LocalDate.now().minusDays(5),
-                60, "10:00", "13:00");
-        assertTrue(livres.isEmpty());
-    }
-
-    /**
      * As peças do processo (defesa prévia, FA/CDC e laudo) devem ser
      * gravadas com a folha; a folha só vale quando a peça está marcada.
      */
@@ -303,6 +248,35 @@ class AudienciaServiceTest extends TesteBase {
 
         participacoes.remover(id, ((Number) participante.get("id")).longValue());
         assertEquals(false, servico.buscarPorId(id).get("reuPreso"));
+    }
+
+    /**
+     * As anotações das peças devem aceitar textos longos (não só o número
+     * da folha).
+     */
+    @Test
+    void anotacaoDePecaDeveAceitarTextoLongo() {
+        long varaId = criarVara("Vara");
+        Map<String, Object> corpo = corpoAudiencia(varaId, "2026-07-06", "10:00");
+        String anotacao = "fls. 30/45 - aditamento às fls. 120; ".repeat(20);
+        corpo.put("denuncia", true);
+        corpo.put("denunciaFolha", anotacao);
+        Map<String, Object> criada = servico.criar(corpo);
+        assertEquals(anotacao.strip().toUpperCase(), criada.get("denunciaFolha"));
+    }
+
+    /**
+     * Durações curtas e fora dos múltiplos de 15 minutos (ex.: 10 min)
+     * devem ser aceitas, com o término calculado corretamente.
+     */
+    @Test
+    void duracaoCurtaDeveSerAceita() {
+        long varaId = criarVara("Vara");
+        Map<String, Object> corpo = corpoAudiencia(varaId, "2026-07-06", "10:00");
+        corpo.put("duracao", 10);
+        Map<String, Object> criada = servico.criar(corpo);
+        assertEquals(10, criada.get("duracao"));
+        assertEquals("10:10", criada.get("horarioFim"));
     }
 
     /**

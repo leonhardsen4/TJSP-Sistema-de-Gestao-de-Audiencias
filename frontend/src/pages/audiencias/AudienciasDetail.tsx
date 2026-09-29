@@ -60,10 +60,10 @@ interface Participante {
   preso?: boolean;
   localPrisao?: string;
   observacoes?: string;
-  representacao?: {
+  representacoes?: {
     tipo: string;
-    advogado: { id: number; nome: string; oab: string };
-  } | null;
+    advogado: { id: number; nome: string; oab: string; telefone?: string | null; email?: string | null };
+  }[];
 }
 
 /** Rótulo e cor da situação do mandado de intimação. */
@@ -71,7 +71,8 @@ const statusMandadoInfo: Record<string, { rotulo: string; classe: string }> = {
   PENDENTE: { rotulo: 'Mandado pendente', classe: 'bg-yellow-100 text-yellow-800' },
   POSITIVO: { rotulo: 'Mandado positivo', classe: 'bg-green-100 text-green-800' },
   NEGATIVO: { rotulo: 'Mandado negativo', classe: 'bg-red-100 text-red-800' },
-  DISPENSADO: { rotulo: 'Mandado dispensado', classe: 'bg-gray-100 text-gray-700' }
+  DISPENSADO: { rotulo: 'Mandado dispensado', classe: 'bg-gray-100 text-gray-700' },
+  OFICIO_REQUISICAO: { rotulo: 'Ofício de requisição', classe: 'bg-blue-100 text-blue-800' }
 };
 
 const AudienciasDetail: React.FC = () => {
@@ -317,32 +318,25 @@ const AudienciasDetail: React.FC = () => {
             </div>
           )}
 
-          {/* Peças processuais juntadas (com a folha, quando informada) */}
+          {/* Peças processuais juntadas, com as folhas/anotações quando informadas */}
           {(audiencia.denuncia || audiencia.defesaPrevia || audiencia.faCdc || audiencia.laudo) && (
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Peças</h3>
-              <div className="flex flex-wrap gap-2">
-                {audiencia.denuncia && (
-                  <Badge className="bg-slate-100 text-slate-800 text-sm">
-                    Denúncia{audiencia.denunciaFolha ? ` (fls. ${audiencia.denunciaFolha})` : ''}
-                  </Badge>
-                )}
-                {audiencia.defesaPrevia && (
-                  <Badge className="bg-slate-100 text-slate-800 text-sm">
-                    Defesa prévia{audiencia.defesaPreviaFolha ? ` (fls. ${audiencia.defesaPreviaFolha})` : ''}
-                  </Badge>
-                )}
-                {audiencia.faCdc && (
-                  <Badge className="bg-slate-100 text-slate-800 text-sm">
-                    FA/CDC{audiencia.faCdcFolha ? ` (fls. ${audiencia.faCdcFolha})` : ''}
-                  </Badge>
-                )}
-                {audiencia.laudo && (
-                  <Badge className="bg-slate-100 text-slate-800 text-sm">
-                    Laudo{audiencia.laudoFolha ? ` (fls. ${audiencia.laudoFolha})` : ''}
-                  </Badge>
-                )}
-              </div>
+              <ul className="space-y-1 text-sm text-gray-800">
+                {([
+                  [audiencia.denuncia, 'Denúncia', audiencia.denunciaFolha],
+                  [audiencia.defesaPrevia, 'Defesa prévia', audiencia.defesaPreviaFolha],
+                  [audiencia.faCdc, 'FA/CDC', audiencia.faCdcFolha],
+                  [audiencia.laudo, 'Laudo', audiencia.laudoFolha]
+                ] as [boolean | undefined, string, string | undefined][])
+                  .filter(([marcada]) => marcada)
+                  .map(([, rotulo, anotacao]) => (
+                    <li key={rotulo} className="bg-slate-50 border border-slate-200 rounded px-3 py-1.5">
+                      <span className="font-semibold">{rotulo}</span>
+                      {anotacao && <span className="whitespace-pre-line">: {anotacao}</span>}
+                    </li>
+                  ))}
+              </ul>
             </div>
           )}
 
@@ -367,9 +361,13 @@ const AudienciasDetail: React.FC = () => {
                           <span className="font-medium">{participante.pessoa.nome}</span>
                           <div className="text-sm text-gray-600">
                             {getTipoParticipacaoLabel(participante.tipo)}
-                            {participante.representacao?.advogado && (
-                              <span> · Adv.: {participante.representacao.advogado.nome} (OAB {participante.representacao.advogado.oab})</span>
-                            )}
+                            {(participante.representacoes || []).map(r => (
+                              <div key={r.advogado.id}>
+                                Adv.: {r.advogado.nome} (OAB {r.advogado.oab})
+                                {r.advogado.telefone && <span className="text-blue-800"> · 📞 {r.advogado.telefone}</span>}
+                                {r.advogado.email && <span className="text-blue-800"> · ✉️ {r.advogado.email}</span>}
+                              </div>
+                            ))}
                           </div>
                           {participante.folhaIntimacao && (
                             <div className="text-xs text-gray-500">Intimação às {participante.folhaIntimacao}</div>

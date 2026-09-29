@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import api from '../../services/api';
-import { maskProcessoCNJ, processoCNJCompleto, toUpper } from '../../utils/masks';
+import { maskCPF, maskOAB, maskProcessoCNJ, processoCNJCompleto, toUpper } from '../../utils/masks';
+import Modal from '../../components/Modal';
+import { PessoaCadastro, PessoaForm } from '../pessoas/PessoasForm';
+import { AdvogadoCadastro, AdvogadoForm } from '../advogados/AdvogadosForm';
 import { TIPOS_PARTICIPACAO, PARTES_PRINCIPAIS, rotuloTipoParticipacao, ordemExibicaoParte } from '../../utils/participacao';
 
 /**
@@ -19,7 +22,16 @@ import { TIPOS_PARTICIPACAO, PARTES_PRINCIPAIS, rotuloTipoParticipacao, ordemExi
  *   procura a audiência anterior mais recente do mesmo processo e oferece
  *   copiar os dados (continuações são comuns no fórum);
  * - Participante marcado como preso liga automaticamente o badge RP da
- *   audiência (calculado no servidor).
+ *   audiência (calculado no servidor);
+ * - Pessoa ou advogado não encontrado na busca pode ser cadastrado numa
+ *   janela modal, sem sair do formulário; o novo cadastro já volta
+ *   selecionado no campo;
+ * - Cada parte pode ter vários advogados ("+ Adicionar advogado" abre
+ *   outro campo de busca), inclusive nas partes já incluídas na lista;
+ * - Ao incluir uma parte, um aviso confirma a inclusão e os campos são
+ *   limpos; a mesma pessoa não pode entrar duas vezes (aviso + limpeza);
+ * - A duração aceita os valores da lista (de 5 em 5 minutos) ou qualquer
+ *   valor digitado.
  *
  * Rotas atendidas:
  * - criação: /pautas/:pautaId/audiencias/nova (aceita ?hora=HH:mm);
@@ -33,7 +45,13 @@ interface Pessoa {
   telefone: string | null;
   email: string | null;
 }
-interface Advogado { id: number; nome: string; oab: string; }
+interface Advogado {
+  id: number;
+  nome: string;
+  oab: string;
+  telefone: string | null;
+  email: string | null;
+}
 
 /** Dados da pauta exibidos no cabeçalho fixo. */
 interface PautaResumo {
@@ -54,13 +72,33 @@ interface ParticipanteForm {
   preso: boolean;
   localPrisao: string;
   observacoes: string;
+  advogados: RepresentacaoForm[];
+}
+
+/** Advogado vinculado a uma parte, com o tipo de representação. */
+interface RepresentacaoForm {
+  advogadoId: number;
+  tipoRepresentacao: string;
+}
+
+/** Linha de busca de advogado na área "Adicionar Parte". */
+interface LinhaAdvogado {
+  /** Chave estável da linha (recria o campo de busca ao limpar). */
+  chave: number;
   advogadoId?: number;
-  tipoRepresentacao?: string;
+  tipoRepresentacao: string;
+}
+
+/** Aviso exibido junto ao botão "Adicionar à Lista". */
+interface AvisoParte {
+  tipo: 'sucesso' | 'erro';
+  texto: string;
 }
 
 interface AudienciaForm {
   hora: string;
-  duracao: number;
+  /** Duração em minutos, como texto (o campo aceita digitação livre). */
+  duracao: string;
   status: string;
   tipoAudiencia: string;
   competencia: string;
@@ -86,8 +124,23 @@ const STATUS_MANDADO: [string, string][] = [
   ['PENDENTE', 'Pendente de cumprimento'],
   ['POSITIVO', 'Cumprido - positivo'],
   ['NEGATIVO', 'Cumprido - negativo'],
-  ['DISPENSADO', 'Dispensado']
+  ['DISPENSADO', 'Dispensado'],
+  ['OFICIO_REQUISICAO', 'Ofício de Requisição']
 ];
+
+/** Sugestões de duração da lista (5 a 240 minutos, de 5 em 5). */
+const DURACOES_SUGERIDAS: number[] = Array.from({ length: 48 }, (_, i) => (i + 1) * 5);
+
+/** Tamanho máximo das anotações de cada peça do processo. */
+const MAX_ANOTACAO_PECA = 1000;
+
+/** Descreve uma duração em minutos (ex.: 90 → "1h 30min"). */
+const descreverDuracao = (minutos: number): string => {
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto === 0 ? `${horas}h` : `${horas}h ${String(resto).padStart(2, '0')}min`;
+};
 
 /** Rótulos dos tipos de audiência (usados no formulário e no texto do Teams). */
 const TIPOS_AUDIENCIA: [string, string][] = [
@@ -115,9 +168,15 @@ const PARTICIPANTE_VAZIO: ParticipanteForm = {
   preso: false,
   localPrisao: '',
   observacoes: '',
-  advogadoId: undefined,
-  tipoRepresentacao: undefined
+  advogados: []
 };
+
+/** Tipos de representação oferecidos no formulário. */
+const TIPOS_REPRESENTACAO: [string, string][] = [
+  ['CONSTITUIDO', 'Constituído'],
+  ['DATIVO', 'Dativo'],
+  ['AD_HOC', 'Ad Hoc']
+];
 
 /** Peças do processo: campo booleano, campo da folha e rótulo exibido. */
 const PECAS: { flag: keyof AudienciaForm; folha: keyof AudienciaForm; rotulo: string }[] = [
@@ -145,6 +204,111 @@ const dataPorExtenso = (iso: string): string => {
 const INPUT = 'shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline';
 const LABEL = 'block text-gray-700 text-sm font-bold mb-2';
 
+/** Propriedades do campo de busca de advogado. */
+interface CampoAdvogadoProps {
+  advogados: Advogado[];
+  /** Advogado selecionado (undefined = nenhum). */
+  advogadoId?: number;
+  /** Chamado ao escolher um advogado, ou com undefined ao desfazer a escolha. */
+  onSelecionar: (advogadoId?: number) => void;
+  /** Chamado quando a busca não acha ninguém e o usuário quer cadastrar. */
+  onCadastrar: (termo: string) => void;
+  /** Foca o campo ao aparecer (útil quando é aberto por um botão). */
+  autoFocus?: boolean;
+}
+
+/** Contatos (telefone e e-mail) de um advogado, formatados para exibição. */
+const contatosDoAdvogado = (advogado?: Advogado): string[] => {
+  const contatos: string[] = [];
+  if (advogado?.telefone) contatos.push(`📞 ${advogado.telefone}`);
+  if (advogado?.email) contatos.push(`✉️ ${advogado.email}`);
+  return contatos;
+};
+
+/**
+ * Campo de busca de advogado por nome ou OAB, com lista de sugestões,
+ * contatos do selecionado e oferta de cadastro quando nada é encontrado.
+ * Cada campo tem seu próprio texto de busca, o que permite vários na tela.
+ */
+const CampoAdvogado: React.FC<CampoAdvogadoProps> = ({ advogados, advogadoId, onSelecionar, onCadastrar, autoFocus }) => {
+  const [filtro, setFiltro] = useState('');
+  const [aberto, setAberto] = useState(false);
+  const raiz = useRef<HTMLDivElement>(null);
+  const selecionado = advogados.find(a => a.id === advogadoId);
+
+  // Mostra o advogado escolhido (inclusive o recém-cadastrado na modal).
+  useEffect(() => {
+    if (selecionado) setFiltro(`${selecionado.nome} - OAB: ${selecionado.oab}`);
+  }, [selecionado]);
+
+  // Fecha a lista ao clicar fora deste campo.
+  useEffect(() => {
+    const aoClicar = (e: MouseEvent) => {
+      if (raiz.current && !raiz.current.contains(e.target as Node)) setAberto(false);
+    };
+    document.addEventListener('mousedown', aoClicar);
+    return () => document.removeEventListener('mousedown', aoClicar);
+  }, []);
+
+  const termo = filtro.toLowerCase();
+  const encontrados = advogados.filter(a =>
+    a.nome.toLowerCase().includes(termo) || (a.oab || '').toLowerCase().includes(termo));
+
+  return (
+    <div className="relative" ref={raiz}>
+      <input
+        type="text"
+        className={INPUT}
+        placeholder="DIGITE O NOME OU OAB DO ADVOGADO..."
+        value={filtro}
+        autoFocus={autoFocus}
+        onChange={(e) => {
+          setFiltro(toUpper(e.target.value));
+          setAberto(true);
+          // Qualquer edição desfaz a escolha anterior (evita vincular o
+          // advogado antigo com outro nome digitado).
+          if (advogadoId) onSelecionar(undefined);
+        }}
+        onFocus={() => setAberto(true)}
+      />
+      {aberto && !advogadoId && encontrados.length > 0 && (
+        <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+          {encontrados.slice(0, 10).map(advogado => (
+            <div
+              key={advogado.id}
+              className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+              onClick={() => { onSelecionar(advogado.id); setAberto(false); }}
+            >
+              <div className="font-medium">{advogado.nome}</div>
+              <div className="text-sm text-gray-600">
+                OAB: {advogado.oab}
+                {contatosDoAdvogado(advogado).length > 0 && `   ${contatosDoAdvogado(advogado).join('   ')}`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {filtro.trim().length >= 3 && !advogadoId && encontrados.length === 0 && (
+        <div className="mt-2 bg-yellow-50 border border-yellow-300 rounded px-3 py-2 text-sm text-yellow-900">
+          Nenhum advogado cadastrado com “{filtro.trim()}”. Deseja cadastrá-lo?
+          <button
+            type="button"
+            onClick={() => { onCadastrar(filtro.trim()); setAberto(false); }}
+            className="ml-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold py-1 px-3 rounded"
+          >
+            Cadastrar advogado
+          </button>
+        </div>
+      )}
+      {selecionado && (
+        <p className="mt-1 text-sm text-blue-800">
+          {contatosDoAdvogado(selecionado).join('   ') || 'Advogado sem telefone/e-mail cadastrado'}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const FormAudiencia: React.FC = () => {
   const { id, pautaId } = useParams<{ id?: string; pautaId?: string }>();
   const navigate = useNavigate();
@@ -154,7 +318,7 @@ const FormAudiencia: React.FC = () => {
   const [pauta, setPauta] = useState<PautaResumo | null>(null);
   const [formData, setFormData] = useState<AudienciaForm>({
     hora: '',
-    duracao: 60,
+    duracao: '60',
     status: 'PENDENTE',
     tipoAudiencia: '',
     competencia: '',
@@ -181,8 +345,22 @@ const FormAudiencia: React.FC = () => {
   const [novoParticipante, setNovoParticipante] = useState<ParticipanteForm>({ ...PARTICIPANTE_VAZIO });
   const [pessoaFiltro, setPessoaFiltro] = useState('');
   const [showPessoaDropdown, setShowPessoaDropdown] = useState(false);
-  const [advogadoFiltro, setAdvogadoFiltro] = useState('');
-  const [showAdvogadoDropdown, setShowAdvogadoDropdown] = useState(false);
+  /** Contador das chaves das linhas de advogado. */
+  const proximaChave = useRef(1);
+  const novaLinhaAdvogado = useCallback((): LinhaAdvogado =>
+    ({ chave: proximaChave.current++, tipoRepresentacao: '' }), []);
+  const [linhasAdvogado, setLinhasAdvogado] = useState<LinhaAdvogado[]>(() => [novaLinhaAdvogado()]);
+  /** Índice da parte (na lista) que está recebendo mais um advogado. */
+  const [parteRecebendoAdvogado, setParteRecebendoAdvogado] = useState<number | null>(null);
+  const [avisoParte, setAvisoParte] = useState<AvisoParte | null>(null);
+  const [showDuracaoDropdown, setShowDuracaoDropdown] = useState(false);
+  /** Valores iniciais da modal de cadastro rápido aberta (null = fechada). */
+  const [cadastroPessoa, setCadastroPessoa] = useState<Partial<PessoaForm> | null>(null);
+  /** Modal de cadastro de advogado: valores iniciais e quem recebe o novo advogado. */
+  const [cadastroAdvogado, setCadastroAdvogado] = useState<{
+    valores: Partial<AdvogadoForm>;
+    aoCadastrar: (advogadoId: number) => void;
+  } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -206,7 +384,7 @@ const FormAudiencia: React.FC = () => {
           const audiencia = (await api.get(`/audiencias/${id}`)).data;
           setFormData({
             hora: audiencia.horarioInicio,
-            duracao: audiencia.duracao || 60,
+            duracao: String(audiencia.duracao || 60),
             status: audiencia.status,
             tipoAudiencia: audiencia.tipoAudiencia || '',
             competencia: audiencia.competencia || '',
@@ -268,8 +446,10 @@ const FormAudiencia: React.FC = () => {
       preso: p.preso || false,
       localPrisao: p.localPrisao || '',
       observacoes: p.observacoes || '',
-      advogadoId: p.representacao?.advogado?.id || undefined,
-      tipoRepresentacao: p.representacao?.tipo || undefined
+      advogados: (p.representacoes || []).map((r: any) => ({
+        advogadoId: r.advogado.id,
+        tipoRepresentacao: r.tipo || ''
+      }))
     }));
 
   /**
@@ -320,7 +500,7 @@ const FormAudiencia: React.FC = () => {
       }
       setFormData(prev => ({
         ...prev,
-        duracao: anterior.duracao || prev.duracao,
+        duracao: anterior.duracao ? String(anterior.duracao) : prev.duracao,
         tipoAudiencia: anterior.tipoAudiencia || '',
         competencia: anterior.competencia || '',
         formato: anterior.formato || '',
@@ -353,7 +533,9 @@ const FormAudiencia: React.FC = () => {
     const checked = (e.target as HTMLInputElement).checked;
 
     let valor: string | boolean = type === 'checkbox' ? checked : value;
-    if (name === 'processo') {
+    if (name === 'duracao') {
+      valor = value.replace(/\D/g, '').slice(0, 3);
+    } else if (name === 'processo') {
       valor = maskProcessoCNJ(value);
       if (processoCNJCompleto(valor as string)) {
         oferecerCopiaDeAnterior(valor as string);
@@ -371,19 +553,13 @@ const FormAudiencia: React.FC = () => {
     (pessoa.cpf || '').includes(pessoaFiltro)
   );
 
-  /** Filtro do autocomplete de advogados. */
-  const advogadosFiltrados = advogados.filter(advogado =>
-    advogado.nome.toLowerCase().includes(advogadoFiltro.toLowerCase()) ||
-    (advogado.oab || '').toLowerCase().includes(advogadoFiltro.toLowerCase())
-  );
-
   // Fecha os autocompletes ao clicar fora deles.
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       if (!target.closest('.autocomplete')) {
         setShowPessoaDropdown(false);
-        setShowAdvogadoDropdown(false);
+        setShowDuracaoDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -396,25 +572,68 @@ const FormAudiencia: React.FC = () => {
     setNovoParticipante(prev => ({ ...prev, pessoaId: 0 }));
   };
 
-  const handleAdvogadoFiltroChange = (value: string) => {
-    setAdvogadoFiltro(toUpper(value));
-    setShowAdvogadoDropdown(true);
-    if (value === '') {
-      setNovoParticipante(prev => ({ ...prev, advogadoId: undefined, tipoRepresentacao: undefined }));
-    }
-  };
-
   const handlePessoaSelect = (pessoa: Pessoa) => {
     setPessoaFiltro(pessoa.cpf ? `${pessoa.nome} - ${pessoa.cpf}` : pessoa.nome);
     setNovoParticipante(prev => ({ ...prev, pessoaId: pessoa.id }));
     setShowPessoaDropdown(false);
   };
 
-  const handleAdvogadoSelect = (advogado: Advogado) => {
-    setAdvogadoFiltro(`${advogado.nome} - OAB: ${advogado.oab}`);
-    setNovoParticipante(prev => ({ ...prev, advogadoId: advogado.id }));
-    setShowAdvogadoDropdown(false);
+  /**
+   * Abre a modal de cadastro de pessoa aproveitando o que foi digitado na
+   * busca: números viram o CPF; o resto, o nome.
+   */
+  const abrirCadastroPessoa = () => {
+    const termo = pessoaFiltro.trim();
+    setCadastroPessoa(/[A-Z]/i.test(termo) ? { nome: termo } : { cpf: maskCPF(termo) });
+    setShowPessoaDropdown(false);
   };
+
+  /**
+   * Abre a modal de cadastro de advogado com o nome ou a OAB digitados.
+   *
+   * @param termo        texto digitado na busca
+   * @param aoCadastrar  recebe o id do advogado cadastrado
+   */
+  const abrirCadastroAdvogado = (termo: string, aoCadastrar: (advogadoId: number) => void) => {
+    setCadastroAdvogado({
+      valores: /^[\d/]+[A-Z]{0,2}$/i.test(termo) ? { oab: maskOAB(termo) } : { nome: termo },
+      aoCadastrar
+    });
+  };
+
+  /** Pessoa gravada na modal: entra na lista e já fica selecionada. */
+  const pessoaCadastrada = (pessoa: Pessoa) => {
+    setPessoas(prev => [...prev, pessoa]);
+    handlePessoaSelect(pessoa);
+    setCadastroPessoa(null);
+  };
+
+  /** Advogado gravado na modal: entra na lista e já fica selecionado no campo de origem. */
+  const advogadoCadastrado = (advogado: Advogado) => {
+    setAdvogados(prev => [...prev, advogado]);
+    cadastroAdvogado?.aoCadastrar(advogado.id);
+    setCadastroAdvogado(null);
+  };
+
+  /** Altera uma linha de advogado da área "Adicionar Parte". */
+  const alterarLinhaAdvogado = (chave: number, mudancas: Partial<LinhaAdvogado>) => {
+    setLinhasAdvogado(prev => prev.map(l => (l.chave === chave ? { ...l, ...mudancas } : l)));
+  };
+
+  /** Volta a área "Adicionar Parte" ao estado inicial. */
+  const limparNovoParticipante = () => {
+    setNovoParticipante({ ...PARTICIPANTE_VAZIO });
+    setPessoaFiltro('');
+    setShowPessoaDropdown(false);
+    setLinhasAdvogado([novaLinhaAdvogado()]);
+  };
+
+  // O aviso de inclusão some sozinho depois de alguns segundos.
+  useEffect(() => {
+    if (!avisoParte) return;
+    const timer = setTimeout(() => setAvisoParte(null), 6000);
+    return () => clearTimeout(timer);
+  }, [avisoParte]);
 
   const handleNovoParticipanteChange = (field: keyof ParticipanteForm, value: any) => {
     setNovoParticipante(prev => ({ ...prev, [field]: value }));
@@ -425,20 +644,34 @@ const FormAudiencia: React.FC = () => {
       setError('Selecione uma pessoa da lista para adicionar como participante.');
       return;
     }
+    const nome = nomePessoa(novoParticipante.pessoaId);
     if (participantes.some(p => p.pessoaId === novoParticipante.pessoaId)) {
-      setError('Esta pessoa já foi adicionada como participante.');
+      limparNovoParticipante();
+      setAvisoParte({
+        tipo: 'erro',
+        texto: `${nome} já está na lista de partes desta audiência. A mesma pessoa não pode ser incluída duas vezes; os campos foram limpos.`
+      });
       return;
     }
+    // Advogados escolhidos, sem repetição.
+    const advogadosDaParte: RepresentacaoForm[] = [];
+    linhasAdvogado.forEach(l => {
+      if (l.advogadoId && !advogadosDaParte.some(a => a.advogadoId === l.advogadoId)) {
+        advogadosDaParte.push({ advogadoId: l.advogadoId, tipoRepresentacao: l.tipoRepresentacao });
+      }
+    });
     setError(null);
-    setParticipantes([...participantes, { ...novoParticipante }]);
-    setNovoParticipante({ ...PARTICIPANTE_VAZIO });
-    setPessoaFiltro('');
-    setShowPessoaDropdown(false);
-    setAdvogadoFiltro('');
-    setShowAdvogadoDropdown(false);
+    setParticipantes([...participantes, { ...novoParticipante, advogados: advogadosDaParte }]);
+    limparNovoParticipante();
+    setAvisoParte({
+      tipo: 'sucesso',
+      texto: `${nome} foi incluída na lista de partes como ${rotuloTipoParticipacao(novoParticipante.tipo)}. `
+        + 'Clique em Salvar para gravar a audiência.'
+    });
   };
 
   const removerParticipante = (index: number) => {
+    setParteRecebendoAdvogado(null);
     setParticipantes(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -457,6 +690,28 @@ const FormAudiencia: React.FC = () => {
     if (pessoa?.telefone) contatos.push(`📞 ${pessoa.telefone}`);
     if (pessoa?.email) contatos.push(`✉️ ${pessoa.email}`);
     return contatos;
+  };
+
+  /** Inclui um advogado numa parte já listada (sem repetir). */
+  const incluirAdvogadoNaParte = (index: number, advogadoId: number) => {
+    setParticipantes(prev => prev.map((p, i) => (i === index && !p.advogados.some(a => a.advogadoId === advogadoId)
+      ? { ...p, advogados: [...p.advogados, { advogadoId, tipoRepresentacao: '' }] }
+      : p)));
+    setParteRecebendoAdvogado(null);
+  };
+
+  /** Retira um advogado de uma parte já listada. */
+  const retirarAdvogadoDaParte = (index: number, advogadoId: number) => {
+    setParticipantes(prev => prev.map((p, i) => (i === index
+      ? { ...p, advogados: p.advogados.filter(a => a.advogadoId !== advogadoId) }
+      : p)));
+  };
+
+  /** Altera o tipo de representação de um advogado de uma parte já listada. */
+  const alterarTipoRepresentacao = (index: number, advogadoId: number, tipoRepresentacao: string) => {
+    setParticipantes(prev => prev.map((p, i) => (i === index
+      ? { ...p, advogados: p.advogados.map(a => (a.advogadoId === advogadoId ? { ...a, tipoRepresentacao } : a)) }
+      : p)));
   };
 
   const rotuloDe = (lista: [string, string][], valor: string): string =>
@@ -508,6 +763,13 @@ const FormAudiencia: React.FC = () => {
       setSubmitting(true);
       setError(null);
 
+      const duracao = Number(formData.duracao);
+      if (!duracao || duracao <= 0) {
+        setError('Informe a duração da audiência em minutos (maior que zero).');
+        setSubmitting(false);
+        return;
+      }
+
       if (!processoCNJCompleto(formData.processo)) {
         setError('O número do processo deve ter os 20 dígitos do padrão CNJ.');
         setSubmitting(false);
@@ -535,7 +797,7 @@ const FormAudiencia: React.FC = () => {
           params: {
             data: pauta.data,
             horarioInicio: formData.hora,
-            duracao: formData.duracao,
+            duracao,
             varaId: pauta.vara.id,
             ...(id ? { audienciaId: id } : {})
           }
@@ -559,7 +821,7 @@ const FormAudiencia: React.FC = () => {
       const payload = {
         numeroProcesso: formData.processo,
         horarioInicio: formData.hora,
-        duracao: formData.duracao,
+        duracao,
         status: formData.status,
         tipoAudiencia: formData.tipoAudiencia,
         competencia: formData.competencia,
@@ -604,10 +866,10 @@ const FormAudiencia: React.FC = () => {
             localPrisao: p.preso ? p.localPrisao || '' : '',
             observacoes: p.observacoes || ''
           };
-          if (p.advogadoId && p.advogadoId > 0) {
-            parte.advogadoId = Number(p.advogadoId);
-            parte.tipoRepresentacao = p.tipoRepresentacao || 'DEFESA';
-          }
+          parte.advogados = p.advogados.map(a => ({
+            advogadoId: Number(a.advogadoId),
+            tipoRepresentacao: a.tipoRepresentacao || 'DEFESA'
+          }));
           return parte;
         });
       await api.put(`/audiencias/${audienciaId}/participantes`, partesPayload);
@@ -647,6 +909,14 @@ const FormAudiencia: React.FC = () => {
             </button>
           )}
           <button
+            type="submit"
+            form="form-audiencia"
+            disabled={submitting}
+            className="bg-blue-900 hover:bg-blue-800 text-white font-bold py-2 px-4 rounded disabled:opacity-60"
+          >
+            {submitting ? 'Salvando...' : 'Salvar'}
+          </button>
+          <button
             type="button"
             onClick={voltar}
             className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded"
@@ -685,7 +955,7 @@ const FormAudiencia: React.FC = () => {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6 mb-4">
+      <form id="form-audiencia" onSubmit={handleSubmit} className="space-y-6 mb-4">
         {/* Seção 1: Processo e horário */}
         <fieldset className="bg-white shadow-md rounded p-6">
           <h2 className="text-lg font-bold text-gray-800 mb-4">Processo e Horário</h2>
@@ -710,11 +980,48 @@ const FormAudiencia: React.FC = () => {
               <input className={INPUT} id="hora" name="hora" type="time"
                      value={formData.hora} onChange={handleChange} required />
             </div>
-            <div>
+            <div className="relative autocomplete">
               <label className={LABEL} htmlFor="duracao">Duração (min)*</label>
-              <input className={INPUT} id="duracao" name="duracao" type="number"
-                     min="15" max="480" step="15" placeholder="60"
-                     value={formData.duracao} onChange={handleChange} required />
+              <div className="flex">
+                <input
+                  className={`${INPUT} rounded-r-none`}
+                  id="duracao"
+                  name="duracao"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="60"
+                  title="Escolha na lista ou digite os minutos"
+                  value={formData.duracao}
+                  onChange={handleChange}
+                  required
+                />
+                <button
+                  type="button"
+                  className="border border-l-0 rounded-r px-3 bg-gray-50 hover:bg-gray-100 text-gray-600"
+                  onClick={() => setShowDuracaoDropdown(v => !v)}
+                  aria-label="Escolher duração na lista"
+                >
+                  ▾
+                </button>
+              </div>
+              {showDuracaoDropdown && (
+                <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                  {DURACOES_SUGERIDAS.map(minutos => (
+                    <div
+                      key={minutos}
+                      className={`px-3 py-1.5 cursor-pointer hover:bg-gray-100 text-sm ${
+                        formData.duracao === String(minutos) ? 'bg-blue-50 font-semibold' : ''
+                      }`}
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, duracao: String(minutos) }));
+                        setShowDuracaoDropdown(false);
+                      }}
+                    >
+                      {minutos} min{minutos >= 60 && <span className="text-gray-500"> ({descreverDuracao(minutos)})</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="col-span-2">
               <label className={LABEL} htmlFor="artigo">Artigo / Assunto</label>
@@ -792,12 +1099,12 @@ const FormAudiencia: React.FC = () => {
         <fieldset className="bg-white shadow-md rounded p-6">
           <h2 className="text-lg font-bold text-gray-800 mb-4">Peças do Processo</h2>
           <p className="text-gray-500 text-sm mb-4">
-            Marque as peças presentes e anote a folha onde se encontram — elas saem na pauta em PDF.
+            Marque as peças presentes e anote as folhas e o que mais for útil — elas saem na pauta em PDF.
           </p>
           <div className="space-y-3">
             {PECAS.map(({ flag, folha, rotulo }) => (
-              <div key={flag} className="flex items-center gap-3">
-                <label className="flex items-center text-gray-700 text-sm font-bold cursor-pointer w-72 shrink-0">
+              <div key={flag} className="flex items-start gap-3">
+                <label className="flex items-center text-gray-700 text-sm font-bold cursor-pointer w-72 shrink-0 pt-2">
                   <input
                     type="checkbox"
                     name={flag}
@@ -807,16 +1114,23 @@ const FormAudiencia: React.FC = () => {
                   />
                   {rotulo}
                 </label>
-                <input
-                  className={`${INPUT} flex-1 ${formData[flag] ? '' : 'bg-gray-100 text-gray-400'}`}
-                  name={folha}
-                  type="text"
-                  placeholder={formData[flag] ? 'Folha (ex.: FLS. 30)' : '—'}
-                  maxLength={30}
-                  value={formData[folha] as string}
-                  onChange={handleChange}
-                  disabled={!formData[flag]}
-                />
+                <div className="flex-1">
+                  <textarea
+                    className={`${INPUT} ${formData[flag] ? '' : 'bg-gray-100 text-gray-400'}`}
+                    name={folha}
+                    rows={formData[flag] ? 2 : 1}
+                    placeholder={formData[flag] ? 'FOLHAS E ANOTAÇÕES (EX.: FLS. 30/35; ADITAMENTO ÀS FLS. 120)' : '—'}
+                    maxLength={MAX_ANOTACAO_PECA}
+                    value={formData[folha] as string}
+                    onChange={handleChange}
+                    disabled={!formData[flag]}
+                  />
+                  {formData[flag] && (formData[folha] as string).length > MAX_ANOTACAO_PECA * 0.8 && (
+                    <p className="text-xs text-gray-500 text-right">
+                      {(formData[folha] as string).length}/{MAX_ANOTACAO_PECA}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -904,6 +1218,24 @@ const FormAudiencia: React.FC = () => {
                     ))}
                   </div>
                 )}
+                {pessoaFiltro.trim().length >= 3 && novoParticipante.pessoaId === 0
+                  && pessoasFiltradas.length === 0 && (
+                  <div className="mt-2 bg-yellow-50 border border-yellow-300 rounded px-3 py-2 text-sm text-yellow-900">
+                    Nenhuma pessoa cadastrada com “{pessoaFiltro.trim()}”. Deseja cadastrá-la?
+                    <button
+                      type="button"
+                      onClick={abrirCadastroPessoa}
+                      className="ml-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold py-1 px-3 rounded"
+                    >
+                      Cadastrar pessoa
+                    </button>
+                  </div>
+                )}
+                {novoParticipante.pessoaId > 0 && contatosPessoa(novoParticipante.pessoaId).length > 0 && (
+                  <p className="mt-1 text-sm text-blue-800">
+                    {contatosPessoa(novoParticipante.pessoaId).join('   ')}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -919,47 +1251,55 @@ const FormAudiencia: React.FC = () => {
                 </select>
               </div>
 
-              <div className="relative autocomplete">
-                <label className={LABEL}>Advogado</label>
-                <input
-                  type="text"
-                  className={INPUT}
-                  placeholder="DIGITE O NOME OU OAB DO ADVOGADO..."
-                  value={advogadoFiltro}
-                  onChange={(e) => handleAdvogadoFiltroChange(e.target.value)}
-                  onFocus={() => setShowAdvogadoDropdown(true)}
-                />
-                {showAdvogadoDropdown && advogadosFiltrados.length > 0 && (
-                  <div className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
-                    {advogadosFiltrados.slice(0, 10).map(advogado => (
-                      <div
-                        key={advogado.id}
-                        className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
-                        onClick={() => handleAdvogadoSelect(advogado)}
-                      >
-                        <div className="font-medium">{advogado.nome}</div>
-                        <div className="text-sm text-gray-600">OAB: {advogado.oab}</div>
+              <div className="md:col-span-2">
+                <label className={LABEL}>Advogado(s)</label>
+                <div className="space-y-3">
+                  {linhasAdvogado.map(linha => (
+                    <div key={linha.chave} className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
+                      <CampoAdvogado
+                        advogados={advogados}
+                        advogadoId={linha.advogadoId}
+                        autoFocus={linhasAdvogado.length > 1 && !linha.advogadoId}
+                        onSelecionar={(advogadoId) => alterarLinhaAdvogado(linha.chave, { advogadoId })}
+                        onCadastrar={(termo) => abrirCadastroAdvogado(termo,
+                          (advogadoId) => alterarLinhaAdvogado(linha.chave, { advogadoId }))}
+                      />
+                      <div className="flex gap-2">
+                        {linha.advogadoId && (
+                          <select
+                            className={INPUT}
+                            value={linha.tipoRepresentacao}
+                            onChange={(e) => alterarLinhaAdvogado(linha.chave, { tipoRepresentacao: e.target.value })}
+                            title="Tipo de representação"
+                          >
+                            <option value="">Tipo de representação</option>
+                            {TIPOS_REPRESENTACAO.map(([valor, rotulo]) => (
+                              <option key={valor} value={valor}>{rotulo}</option>
+                            ))}
+                          </select>
+                        )}
+                        {linhasAdvogado.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setLinhasAdvogado(prev => prev.filter(l => l.chave !== linha.chave))}
+                            className="shrink-0 bg-white border border-red-300 text-red-700 hover:bg-red-50 text-sm font-bold py-2 px-3 rounded"
+                            title="Retirar este advogado"
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {novoParticipante.advogadoId && (
-                <div>
-                  <label className={LABEL}>Tipo de Representação</label>
-                  <select
-                    className={INPUT}
-                    value={novoParticipante.tipoRepresentacao || ''}
-                    onChange={(e) => handleNovoParticipanteChange('tipoRepresentacao', e.target.value)}
-                  >
-                    <option value="">Selecione o tipo</option>
-                    <option value="CONSTITUIDO">Constituído</option>
-                    <option value="DATIVO">Dativo</option>
-                    <option value="AD_HOC">Ad Hoc</option>
-                  </select>
+                    </div>
+                  ))}
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setLinhasAdvogado(prev => [...prev, novaLinhaAdvogado()])}
+                  className="mt-2 text-sm font-bold text-blue-800 hover:text-blue-900 hover:underline"
+                >
+                  + Adicionar advogado
+                </button>
+              </div>
 
               <div>
                 <label className={LABEL}>Situação do mandado de intimação</label>
@@ -1034,7 +1374,19 @@ const FormAudiencia: React.FC = () => {
               />
             </div>
 
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              {avisoParte && (
+                <div
+                  role="alert"
+                  className={`flex-1 min-w-[16rem] px-4 py-2 rounded border text-sm font-semibold ${
+                    avisoParte.tipo === 'sucesso'
+                      ? 'bg-green-50 border-green-400 text-green-800'
+                      : 'bg-red-50 border-red-400 text-red-800'
+                  }`}
+                >
+                  {avisoParte.tipo === 'sucesso' ? '✔ ' : '⚠ '}{avisoParte.texto}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={adicionarParticipante}
@@ -1157,12 +1509,70 @@ const FormAudiencia: React.FC = () => {
                     {contatosPessoa(participante.pessoaId).join('   ')}
                   </p>
                 )}
-                {participante.advogadoId && (
-                  <p>
-                    <strong>Advogado:</strong> {advogados.find(a => a.id === participante.advogadoId)?.nome}
-                    {' '}- OAB: {advogados.find(a => a.id === participante.advogadoId)?.oab}
-                    {participante.tipoRepresentacao && ` (${participante.tipoRepresentacao})`}
-                  </p>
+                {participante.advogados.map(({ advogadoId, tipoRepresentacao }) => {
+                  const advogado = advogados.find(a => a.id === advogadoId);
+                  return (
+                    <div key={advogadoId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span>
+                        <strong>Advogado:</strong> {advogado?.nome || 'Advogado não encontrado'}
+                        {advogado && ` - OAB: ${advogado.oab}`}
+                      </span>
+                      <select
+                        className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+                        value={tipoRepresentacao}
+                        onChange={(e) => alterarTipoRepresentacao(index, advogadoId, e.target.value)}
+                        title="Tipo de representação"
+                      >
+                        <option value="">Tipo…</option>
+                        {TIPOS_REPRESENTACAO.map(([valor, rotulo]) => (
+                          <option key={valor} value={valor}>{rotulo}</option>
+                        ))}
+                        {/* Tipos gravados por versões anteriores continuam visíveis. */}
+                        {tipoRepresentacao && !TIPOS_REPRESENTACAO.some(([v]) => v === tipoRepresentacao) && (
+                          <option value={tipoRepresentacao}>{tipoRepresentacao}</option>
+                        )}
+                      </select>
+                      {contatosDoAdvogado(advogado).length > 0 && (
+                        <span className="text-blue-800">{contatosDoAdvogado(advogado).join('   ')}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => retirarAdvogadoDaParte(index, advogadoId)}
+                        className="text-red-700 hover:text-red-900 text-xs font-bold"
+                        title="Retirar este advogado da parte"
+                      >
+                        retirar
+                      </button>
+                    </div>
+                  );
+                })}
+                {parteRecebendoAdvogado === index ? (
+                  <div className="flex items-start gap-2 pt-1">
+                    <div className="flex-1">
+                      <CampoAdvogado
+                        advogados={advogados}
+                        autoFocus
+                        onSelecionar={(advogadoId) => advogadoId && incluirAdvogadoNaParte(index, advogadoId)}
+                        onCadastrar={(termo) => abrirCadastroAdvogado(termo,
+                          (advogadoId) => incluirAdvogadoNaParte(index, advogadoId))}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setParteRecebendoAdvogado(null)}
+                      className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold py-2 px-3 rounded"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setParteRecebendoAdvogado(index)}
+                    className="text-xs font-bold text-blue-800 hover:underline"
+                  >
+                    + Adicionar advogado
+                  </button>
                 )}
                 {participante.observacoes && (
                   <p><strong>Observações:</strong> {participante.observacoes}</p>
@@ -1229,6 +1639,27 @@ const FormAudiencia: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Cadastros rápidos: ficam fora do <form> da audiência (formulários
+          não podem ser aninhados). */}
+      {cadastroPessoa && (
+        <Modal titulo="Cadastrar Pessoa" onFechar={() => setCadastroPessoa(null)}>
+          <PessoaCadastro
+            valoresIniciais={cadastroPessoa}
+            onSalvo={pessoaCadastrada}
+            onCancelar={() => setCadastroPessoa(null)}
+          />
+        </Modal>
+      )}
+      {cadastroAdvogado && (
+        <Modal titulo="Cadastrar Advogado" onFechar={() => setCadastroAdvogado(null)}>
+          <AdvogadoCadastro
+            valoresIniciais={cadastroAdvogado.valores}
+            onSalvo={advogadoCadastrado}
+            onCancelar={() => setCadastroAdvogado(null)}
+          />
+        </Modal>
+      )}
     </div>
   );
 };

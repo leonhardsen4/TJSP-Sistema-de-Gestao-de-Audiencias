@@ -265,3 +265,37 @@ Ações efetivas desta sessão:
   no JAR (`/public`); `empacotar-distribuivel.sh` gera pacotes Windows/Linux **com um
   Java 17 portátil embutido** — rodam sem instalar Java e sem admin. Necessário porque as
   estações do TJSP têm no máximo JRE 1.8, incompatível com a stack (Java 17).
+
+## Rodada de 29/09/2026 (cadastro/edição de audiência)
+- **Anotações das peças mais longas**: Denúncia, Defesa Prévia, FA/CDC e Laudo aceitam
+  até 1.000 caracteres (antes 30) em caixa de texto; no detalhe viram lista (não badge).
+- **Duração**: campo digitável (ex.: 10 min) com lista de sugestões de 5 em 5 minutos
+  (5 a 240); antes era número com passo de 15 e mínimo 15.
+- **Situação do mandado "Ofício de Requisição"** (`StatusMandado.OFICIO_REQUISICAO`):
+  não gera alerta de mandado (o checkbox "intimado" continua sendo a confirmação).
+- **Contato do advogado** (telefone/e-mail) exibido ao selecioná-lo e na lista de partes.
+- **Cadastro rápido em modal**: se a busca de pessoa/advogado não encontra ninguém, o
+  formulário oferece cadastrar; o cadastro abre em janela (`components/Modal.tsx`,
+  reusando `PessoaCadastro`/`AdvogadoCadastro`) e o novo registro já volta selecionado.
+- **Botão Salvar no topo** (entre "Abrir Pauta" e "Voltar").
+- **Testes sem "prazo de validade"**: os de horários livres usavam datas fixas de
+  jul/2026 (o serviço ignora dias passados) e quebraram; agora usam uma segunda-feira
+  futura calculada. O de estatísticas deixou de usar 2030-01-07 fixo.
+- **Correção**: editar o texto do campo Advogado agora desfaz a seleção anterior (antes o
+  advogado antigo continuava vinculado mesmo digitando outro nome).
+- Logs `[API Request]/[API Response]` no console do navegador só em desenvolvimento.
+- **Removido** (a pedido): endpoint `GET /api/audiencias/buscar-horarios-livres` e
+  `AudienciaService.buscarHorariosLivres` (+ 3 testes). Sem uso desde a remoção da tela
+  Horários Livres; os blocos livres da pauta são calculados no frontend (`PautaDetail`).
+- **Aviso ao incluir parte**: ao clicar em "Adicionar à Lista", aparece ao lado do botão
+  um aviso verde confirmando a inclusão (e lembrando de Salvar) e os campos são limpos.
+  Pessoa já incluída: aviso vermelho e campos limpos. O servidor também recusa pessoa
+  repetida na mesma audiência (400), e o `PUT .../participantes` não altera nada nesse caso.
+- **Vários advogados por parte**: "+ Adicionar advogado" abre outro campo de busca
+  (componente `CampoAdvogado`, cada um com cadastro rápido em modal). Nas partes já
+  listadas, dá para incluir/retirar advogados e trocar o tipo de representação.
+  API: o participante agora traz `representacoes` (lista, com telefone/e-mail do
+  advogado) no lugar de `representacao`; a gravação aceita `advogados:
+  [{advogadoId, tipoRepresentacao}]` (o `advogadoId` único antigo continua aceito).
+  O banco não mudou (`representacao_advogado` já permitia N por parte). PDF lista um
+  advogado por linha.

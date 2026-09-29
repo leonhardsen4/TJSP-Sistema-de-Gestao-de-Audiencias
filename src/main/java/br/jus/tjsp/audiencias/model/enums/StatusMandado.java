@@ -18,7 +18,13 @@ public enum StatusMandado {
     NEGATIVO("Cumprido - negativo"),
 
     /** Mandado desnecessário (ex.: parte intimada em audiência ou por outro meio). */
-    DISPENSADO("Dispensado");
+    DISPENSADO("Dispensado"),
+
+    /**
+     * Intimação feita por ofício de requisição (comum para testemunhas
+     * servidoras públicas, como policiais). Não gera alerta de mandado.
+     */
+    OFICIO_REQUISICAO("Ofício de requisição");
 
     /** Descrição em português exibida ao usuário. */
     private final String descricao;

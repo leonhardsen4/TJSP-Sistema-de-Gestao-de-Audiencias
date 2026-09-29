@@ -9,7 +9,7 @@ import { maskOAB, maskTelefone, toUpper } from '../../utils/masks';
  * ex.: 123456/SP).
  */
 
-interface AdvogadoForm {
+export interface AdvogadoForm {
   nome: string;
   oab: string;
   email: string;
@@ -17,9 +17,24 @@ interface AdvogadoForm {
   observacoes: string;
 }
 
-const AdvogadosForm: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+/** Propriedades do formulário reutilizável de advogado. */
+export interface AdvogadoCadastroProps {
+  /** Id em edição; ausente para cadastro novo. */
+  id?: string;
+  /** Valores iniciais de um cadastro novo (ex.: nome já digitado em outra tela). */
+  valoresIniciais?: Partial<AdvogadoForm>;
+  /** Chamado com o registro gravado (devolvido pela API, com id). */
+  onSalvo: (registro: any) => void;
+  /** Chamado ao clicar em Cancelar. */
+  onCancelar: () => void;
+}
+
+/**
+ * Formulário de advogado sem vínculo com rotas: usado pela página de
+ * cadastro e pela janela modal do formulário de audiência (cadastro rápido
+ * sem sair da tela).
+ */
+export const AdvogadoCadastro: React.FC<AdvogadoCadastroProps> = ({ id, valoresIniciais, onSalvo, onCancelar }) => {
   const isEdicao = !!id;
 
   const [formData, setFormData] = useState<AdvogadoForm>({
@@ -27,7 +42,8 @@ const AdvogadosForm: React.FC = () => {
     oab: '',
     email: '',
     telefone: '',
-    observacoes: ''
+    observacoes: '',
+    ...valoresIniciais
   });
 
   const [loading, setLoading] = useState<boolean>(false);
@@ -80,13 +96,11 @@ const AdvogadosForm: React.FC = () => {
       setSubmitting(true);
       setError(null);
 
-      if (isEdicao) {
-        await api.put(`/advogados/${id}`, formData);
-      } else {
-        await api.post('/advogados', formData);
-      }
+      const resposta = isEdicao
+        ? await api.put(`/advogados/${id}`, formData)
+        : await api.post('/advogados', formData);
 
-      navigate('/advogados');
+      onSalvo(resposta.data);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao salvar advogado. Por favor, tente novamente.');
       console.error('Erro ao salvar advogado:', err);
@@ -104,11 +118,7 @@ const AdvogadosForm: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">
-        {isEdicao ? 'Editar Advogado' : 'Novo Advogado'}
-      </h1>
-
+    <div>
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
           <strong className="font-bold">Erro!</strong>
@@ -189,7 +199,7 @@ const AdvogadosForm: React.FC = () => {
           <button
             className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
             type="button"
-            onClick={() => navigate('/advogados')}
+            onClick={onCancelar}
           >
             Cancelar
           </button>
@@ -202,6 +212,24 @@ const AdvogadosForm: React.FC = () => {
           </button>
         </div>
       </form>
+    </div>
+  );
+};
+
+/**
+ * Página de cadastro/edição de advogado (rotas /advogados/novo e
+ * /advogados/editar/:id).
+ */
+const AdvogadosForm: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-2xl font-bold text-gray-800 mb-6">
+        {id ? 'Editar Advogado' : 'Novo Advogado'}
+      </h1>
+      <AdvogadoCadastro id={id} onSalvo={() => navigate('/advogados')} onCancelar={() => navigate('/advogados')} />
     </div>
   );
 };

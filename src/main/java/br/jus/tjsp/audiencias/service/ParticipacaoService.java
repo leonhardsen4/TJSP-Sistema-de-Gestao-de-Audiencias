@@ -8,13 +8,17 @@ import br.jus.tjsp.audiencias.web.ApiException;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Gerencia os participantes de uma audiência (partes, testemunhas etc.)
- * e a representação por advogado associada a cada participante.
+ * e as representações por advogado de cada participante (uma parte pode
+ * ter vários advogados).
  *
  * <p>Atende às rotas aninhadas {@code /audiencias/{id}/participantes}
  * usadas pelo formulário de audiências do frontend.</p>
@@ -23,41 +27,71 @@ public class ParticipacaoService {
 
     /**
      * Lista os participantes de uma audiência, incluindo os dados da pessoa
-     * e, quando houver, a representação de advogado correspondente.
+     * e as representações por advogado (na ordem em que foram gravadas).
      *
      * @param audienciaId id da audiência
      * @return participantes no formato {@code {id, tipo, intimado, observacoes,
-     *         pessoa{...}, representacao{tipo, advogado{...}}}}
+     *         pessoa{...}, representacoes[{tipo, advogado{id, nome, oab, telefone, email}}]}}
      */
     public List<Map<String, Object>> listar(long audienciaId) {
-        return Database.query("""
+        List<Map<String, Object>> participantes = Database.query("""
                         SELECT pa.id, pa.tipo, pa.intimado, pa.status_mandado, pa.folha_intimacao,
                                pa.preso, pa.local_prisao, pa.observacoes,
-                               pe.id AS pessoa_id, pe.nome AS pessoa_nome, pe.cpf AS pessoa_cpf,
-                               ra.tipo AS repr_tipo,
-                               ad.id AS adv_id, ad.nome AS adv_nome, ad.oab AS adv_oab
+                               pe.id AS pessoa_id, pe.nome AS pessoa_nome, pe.cpf AS pessoa_cpf
                         FROM participacao_audiencia pa
                         JOIN pessoa pe ON pe.id = pa.pessoa_id
-                        LEFT JOIN representacao_advogado ra
-                               ON ra.audiencia_id = pa.audiencia_id AND ra.cliente_id = pa.pessoa_id
-                        LEFT JOIN advogado ad ON ad.id = ra.advogado_id
                         WHERE pa.audiencia_id = ?
                         ORDER BY pa.id
                         """,
                 this::mapear, audienciaId);
+
+        // Representações da audiência agrupadas por cliente (pessoa).
+        Map<Long, List<Map<String, Object>>> porCliente = new LinkedHashMap<>();
+        List<Map.Entry<Long, Map<String, Object>>> linhas = Database.query("""
+                        SELECT ra.cliente_id, ra.tipo, ad.id, ad.nome, ad.oab, ad.telefone, ad.email
+                        FROM representacao_advogado ra
+                        JOIN advogado ad ON ad.id = ra.advogado_id
+                        WHERE ra.audiencia_id = ?
+                        ORDER BY ra.id
+                        """,
+                rs -> {
+                    Map<String, Object> advogado = new LinkedHashMap<>();
+                    advogado.put("id", rs.getLong("id"));
+                    advogado.put("nome", rs.getString("nome"));
+                    advogado.put("oab", rs.getString("oab"));
+                    advogado.put("telefone", rs.getString("telefone"));
+                    advogado.put("email", rs.getString("email"));
+                    Map<String, Object> representacao = new LinkedHashMap<>();
+                    representacao.put("tipo", rs.getString("tipo"));
+                    representacao.put("advogado", advogado);
+                    return Map.entry(rs.getLong("cliente_id"), representacao);
+                },
+                audienciaId);
+        for (Map.Entry<Long, Map<String, Object>> linha : linhas) {
+            porCliente.computeIfAbsent(linha.getKey(), k -> new ArrayList<>()).add(linha.getValue());
+        }
+
+        for (Map<String, Object> p : participantes) {
+            long pessoaId = ((Number) ((Map<?, ?>) p.get("pessoa")).get("id")).longValue();
+            p.put("representacoes", porCliente.getOrDefault(pessoaId, List.of()));
+        }
+        return participantes;
     }
 
     /**
-     * Adiciona um participante à audiência e, se um advogado for informado,
-     * registra também a representação (tipo padrão {@code DEFESA}).
+     * Adiciona um participante à audiência e registra as representações por
+     * advogado informadas (tipo padrão {@code DEFESA}). Advogado repetido
+     * na mesma parte é gravado uma única vez.
      *
      * @param audienciaId id da audiência
      * @param dados       corpo com {@code pessoaId}, {@code tipo}, {@code intimado},
-     *                    {@code observacoes} e opcionalmente {@code advogadoId} e
-     *                    {@code tipoRepresentacao}
+     *                    {@code observacoes} e opcionalmente a lista {@code advogados}
+     *                    ({@code [{advogadoId, tipoRepresentacao}]}); o formato antigo,
+     *                    com um só {@code advogadoId}/{@code tipoRepresentacao}, continua aceito
      * @return participante criado, no mesmo formato de {@link #listar(long)}
-     * @throws ApiException 400 se os dados forem inválidos; 404 se audiência,
-     *                      pessoa ou advogado não existirem
+     * @throws ApiException 400 se os dados forem inválidos ou a pessoa já
+     *                      participar da audiência; 404 se audiência, pessoa ou
+     *                      advogado não existirem
      */
     public Map<String, Object> adicionar(long audienciaId, Map<String, Object> dados) {
         exigirExistencia("audiencia", audienciaId);
@@ -82,6 +116,11 @@ public class ParticipacaoService {
             throw ApiException.validacao(erros);
         }
         exigirExistencia("pessoa", pessoaId);
+        if (Database.count("SELECT COUNT(*) FROM participacao_audiencia WHERE audiencia_id = ? AND pessoa_id = ?",
+                audienciaId, pessoaId) > 0) {
+            throw ApiException.validacao(Map.of("pessoaId", "Esta pessoa já é parte desta audiência"));
+        }
+        List<Map<String, Object>> representacoes = lerRepresentacoes(dados);
 
         boolean intimado = Boolean.parseBoolean(String.valueOf(dados.getOrDefault("intimado", "false")));
         String statusMandado = validarStatusMandado(dados.get("statusMandado"));
@@ -104,23 +143,18 @@ public class ParticipacaoService {
                     observacoes == null ? null : observacoes.toString());
             atualizarReuPreso(audienciaId);
 
-            Long advogadoId = lerId(dados, "advogadoId");
-            if (advogadoId != null) {
-                exigirExistencia("advogado", advogadoId);
-                String tipoRepresentacao = TipoRepresentacao.DEFESA.name();
-                Object tipoReprValor = dados.get("tipoRepresentacao");
-                if (tipoReprValor != null && !tipoReprValor.toString().isBlank()) {
-                    try {
-                        tipoRepresentacao = TipoRepresentacao.valueOf(tipoReprValor.toString()).name();
-                    } catch (IllegalArgumentException e) {
-                        throw ApiException.validacao(
-                                Map.of("tipoRepresentacao", "Tipo de representação inválido: " + tipoReprValor));
-                    }
+            Set<Long> gravados = new LinkedHashSet<>();
+            for (Map<String, Object> representacao : representacoes) {
+                Long advogadoId = lerId(representacao, "advogadoId");
+                if (advogadoId == null || !gravados.add(advogadoId)) {
+                    continue;
                 }
+                exigirExistencia("advogado", advogadoId);
                 Database.insert(
                         "INSERT INTO representacao_advogado (audiencia_id, advogado_id, cliente_id, tipo) "
                                 + "VALUES (?, ?, ?, ?)",
-                        audienciaId, advogadoId, pessoaIdFinal, tipoRepresentacao);
+                        audienciaId, advogadoId, pessoaIdFinal,
+                        validarTipoRepresentacao(representacao.get("tipoRepresentacao")));
             }
             return novoId;
         });
@@ -129,6 +163,56 @@ public class ParticipacaoService {
                 .filter(p -> ((Number) p.get("id")).longValue() == id)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Participante recém-criado não encontrado"));
+    }
+
+    /**
+     * Extrai as representações do corpo da requisição: a lista
+     * {@code advogados} ou, no formato antigo, o par
+     * {@code advogadoId}/{@code tipoRepresentacao}.
+     *
+     * @param dados corpo da requisição
+     * @return representações informadas (possivelmente vazia)
+     * @throws ApiException 400 se {@code advogados} não for uma lista de objetos
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> lerRepresentacoes(Map<String, Object> dados) {
+        Object lista = dados.get("advogados");
+        if (lista instanceof List<?> itens) {
+            List<Map<String, Object>> resultado = new ArrayList<>();
+            for (Object item : itens) {
+                if (!(item instanceof Map<?, ?>)) {
+                    throw ApiException.validacao(Map.of("advogados", "Lista de advogados inválida"));
+                }
+                resultado.add((Map<String, Object>) item);
+            }
+            return resultado;
+        }
+        if (lista != null) {
+            throw ApiException.validacao(Map.of("advogados", "Lista de advogados inválida"));
+        }
+        Map<String, Object> unica = new LinkedHashMap<>();
+        unica.put("advogadoId", dados.get("advogadoId"));
+        unica.put("tipoRepresentacao", dados.get("tipoRepresentacao"));
+        return List.of(unica);
+    }
+
+    /**
+     * Valida o tipo de representação; vazio vira {@code DEFESA}.
+     *
+     * @param valor valor recebido
+     * @return nome do enum validado
+     * @throws ApiException 400 se o valor não for um {@link TipoRepresentacao}
+     */
+    private static String validarTipoRepresentacao(Object valor) {
+        if (valor == null || valor.toString().isBlank()) {
+            return TipoRepresentacao.DEFESA.name();
+        }
+        try {
+            return TipoRepresentacao.valueOf(valor.toString()).name();
+        } catch (IllegalArgumentException e) {
+            throw ApiException.validacao(
+                    Map.of("tipoRepresentacao", "Tipo de representação inválido: " + valor));
+        }
     }
 
     /**
@@ -169,8 +253,8 @@ public class ParticipacaoService {
     }
 
     /**
-     * Remove um participante específico e a representação de advogado
-     * associada a ele nesta audiência.
+     * Remove um participante específico e as representações de advogado
+     * associadas a ele nesta audiência.
      *
      * @param audienciaId    id da audiência
      * @param participanteId id da participação a remover
@@ -231,19 +315,6 @@ public class ParticipacaoService {
         pessoa.put("cpf", rs.getString("pessoa_cpf"));
         p.put("pessoa", pessoa);
 
-        long advId = rs.getLong("adv_id");
-        if (!rs.wasNull()) {
-            Map<String, Object> advogado = new LinkedHashMap<>();
-            advogado.put("id", advId);
-            advogado.put("nome", rs.getString("adv_nome"));
-            advogado.put("oab", rs.getString("adv_oab"));
-            Map<String, Object> representacao = new LinkedHashMap<>();
-            representacao.put("tipo", rs.getString("repr_tipo"));
-            representacao.put("advogado", advogado);
-            p.put("representacao", representacao);
-        } else {
-            p.put("representacao", null);
-        }
         return p;
     }
 

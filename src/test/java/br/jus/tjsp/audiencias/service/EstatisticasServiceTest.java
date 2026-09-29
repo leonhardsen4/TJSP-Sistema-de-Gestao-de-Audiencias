@@ -40,7 +40,7 @@ class EstatisticasServiceTest extends TesteBase {
 
         AudienciaService audiencias = new AudienciaService();
         audiencias.criar(corpoAudiencia(varaId, LocalDate.now().toString(), "10:00"));
-        audiencias.criar(corpoAudiencia(varaId, "2030-01-07", "10:00"));
+        audiencias.criar(corpoAudiencia(varaId, LocalDate.now().plusDays(30).toString(), "10:00"));
 
         Map<String, Object> resumo = servico.resumoDashboard();
         assertEquals(2L, resumo.get("totalAudiencias"));

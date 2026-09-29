@@ -577,17 +577,21 @@ public class PautaPdfService {
     }
 
     /**
-     * Descreve o advogado do participante (nome e OAB), se houver.
+     * Descreve os advogados do participante (nome e OAB), um por linha.
      *
      * @param participante participante no formato da API
-     * @return texto "NOME (OAB xxx)" ou "-"
+     * @return texto "NOME (OAB xxx)" por advogado, ou "-" se não houver
      */
     private static String descricaoAdvogado(Map<String, Object> participante) {
-        Object representacao = participante.get("representacao");
-        if (representacao instanceof Map<?, ?> repr && repr.get("advogado") instanceof Map<?, ?> adv) {
-            return adv.get("nome") + " (OAB " + adv.get("oab") + ")";
+        List<String> advogados = new ArrayList<>();
+        if (participante.get("representacoes") instanceof List<?> representacoes) {
+            for (Object item : representacoes) {
+                if (item instanceof Map<?, ?> repr && repr.get("advogado") instanceof Map<?, ?> adv) {
+                    advogados.add(adv.get("nome") + " (OAB " + adv.get("oab") + ")");
+                }
+            }
         }
-        return "-";
+        return advogados.isEmpty() ? "-" : String.join("\n", advogados);
     }
 
     /**
