@@ -74,6 +74,12 @@ Produz em `dist/` um `.zip` (Windows) e um `.tar.gz` (Linux). Basta extrair e
 iniciar (`Iniciar-Sistema.bat` ou `iniciar-sistema.sh`). Detalhes e cuidados de
 rede em [`DISTRIBUICAO.md`](DISTRIBUICAO.md).
 
+**Atualizar uma instalação existente sem perder dados:** feche o sistema, faça uma
+cópia da pasta `data` e extraia o pacote novo **por cima** da pasta antiga (o pacote
+não traz pasta `data`, então o banco `data/tjsp_audiencias.db` é preservado). Se
+preferir uma pasta nova, copie para ela a pasta `data` da versão anterior. Mudanças de
+estrutura do banco, quando existem, são aplicadas automaticamente ao iniciar.
+
 ## 🧪 Testes
 
 ```bash
@@ -108,10 +114,19 @@ mvn test
   mandados com problema)
 - **Pautas**: a audiência nasce dentro de uma pauta (data/vara/juiz/promotor herdados);
   calendário mês/semana/dia na tela de Pautas, com horários livres por pauta
-- **Audiências**: tabela com filtros colapsáveis e persistentes; partes por audiência
-  (réu, vítima, testemunhas...) com advogado, intimação e situação do mandado; réu preso
-  derivado das partes
-- **Mandados e pendências**: acompanhamento da situação das intimações
+- **Audiências**: tabela com filtros colapsáveis e persistentes; réu preso derivado das
+  partes; botão Salvar no topo e no fim do formulário
+  - **Duração** digitável (ex.: 10 min) ou escolhida numa lista de 5 em 5 minutos
+  - **Peças do processo** (Denúncia, Defesa Prévia, FA/CDC, Laudo) com anotações de até
+    1.000 caracteres (folhas e observações), impressas na pauta em PDF
+  - **Partes** (réu, vítima, testemunhas...) com intimação, situação do mandado e prisão;
+    aviso ao incluir cada parte e bloqueio da mesma pessoa em duplicidade
+  - **Vários advogados por parte** ("+ Adicionar advogado"), cada um com o tipo de
+    representação e com telefone/e-mail à vista (para envio dos links de audiência)
+  - **Cadastro rápido**: pessoa ou advogado não encontrado na busca pode ser cadastrado
+    numa janela, sem sair da audiência, e já volta selecionado
+- **Mandados e pendências**: acompanhamento da situação das intimações (pendente,
+  positivo, negativo, dispensado ou **ofício de requisição**)
 - **Documentos em PDF** com timbre oficial (brasão + Tribunal/Comarca): pauta e relação
   de audiências; exportação em CSV e PDF paisagem
 - **Configurações**: dados do usuário, troca de senha e **backup** (CSV + cópia do banco
@@ -131,3 +146,4 @@ mvn test
 
 O projeto foi originalmente construído com Spring Boot + H2 e migrado para
 Javalin + SQLite (ver `MIGRACAO.md` para as decisões e o registro da migração).
+As melhorias feitas depois, rodada a rodada, estão em [`MELHORIAS.md`](MELHORIAS.md).
